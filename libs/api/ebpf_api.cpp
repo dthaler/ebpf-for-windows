@@ -603,12 +603,12 @@ ebpf_map_get_next_key(fd_t map_fd, _In_opt_ const void* previous_key, _Out_ void
 
         result = win32_error_code_to_ebpf_result(invoke_ioctl(request_buffer, reply_buffer));
 
-        if (reply->header.id != ebpf_operation_id_t::EBPF_OPERATION_MAP_GET_NEXT_KEY) {
-            result = EBPF_INVALID_ARGUMENT;
-            goto Exit;
-        }
-
         if (result == EBPF_SUCCESS) {
+            if (reply->header.id != ebpf_operation_id_t::EBPF_OPERATION_MAP_GET_NEXT_KEY) {
+                result = EBPF_INVALID_ARGUMENT;
+                goto Exit;
+            }
+
             std::copy(reply->next_key, reply->next_key + key_size, (uint8_t*)next_key);
         }
     } catch (const std::bad_alloc&) {

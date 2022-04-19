@@ -14,6 +14,8 @@
 std::string
 run_command(_In_ PCSTR command_line, _Out_ int* result)
 {
+    printf("Running command: %s\n\n", command_line);
+
     capture_helper_t capture;
     errno_t error = capture.begin_capture();
     if (error != NO_ERROR) {
@@ -21,34 +23,11 @@ run_command(_In_ PCSTR command_line, _Out_ int* result)
         return "Couldn't capture output\n";
     }
 
-    STARTUPINFOA startup_info = {0};
-    startup_info.dwFlags = STARTF_USESTDHANDLES;
-    startup_info.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    startup_info.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION process_info;
-    PSTR writable_command_line = _strdup(command_line);
-    BOOL ok = CreateProcessA(
-        nullptr, writable_command_line, nullptr, nullptr, true, 0, nullptr, nullptr, &startup_info, &process_info);
-    free(writable_command_line);
-    if (!ok) {
-        *result = GetLastError();
-        return "Couldn't start bpftool.exe\n";
-    }
-
-    WaitForSingleObject(process_info.hProcess, INFINITE);
-
-    DWORD exit_code;
-    if (!GetExitCodeProcess(process_info.hProcess, &exit_code)) {
-        exit_code = GetLastError();
-    }
-
-    CloseHandle(process_info.hProcess);
-    CloseHandle(process_info.hThread);
+    *result = system(command_line);
 
     std::string stderr_contents = capture.get_stderr_contents();
     std::string stdout_contents = capture.get_stdout_contents();
 
-    *result = exit_code;
     return stdout_contents + stderr_contents;
 }
 
@@ -88,10 +67,7 @@ TEST_CASE("prog help", "[prog][help]")
     REQUIRE(result == 0);
 }
 
-// The !shouldfail tag indicates that this test is known to fail
-// even though the test code is probably correct.  The tag should
-// be removed once the code it tests is fixed.
-TEST_CASE("prog load map_in_map.o", "[!shouldfail][prog][load]")
+TEST_CASE("prog load map_in_map.o", "[prog][load]")
 {
     int result;
     std::string output;
@@ -104,30 +80,33 @@ TEST_CASE("prog load map_in_map.o", "[!shouldfail][prog][load]")
     REQUIRE(output == "");
     REQUIRE(result == 0);
 
+    output = run_command("bpftool prog show", &result);
+    REQUIRE(result == 0);
+    std::string id = std::to_string(atoi(output.c_str()));
+    REQUIRE(output == id + ": xdp  name lookup  \n\n");
+
     output = run_command("netsh ebpf sh prog", &result);
     REQUIRE(
-        output == "    ID  Pins  Links  Mode       Type           Name\n"
-                  "======  ====  =====  =========  =============  ====================\n"
-                  "196609     1      0  JIT        xdp            lookup\n\n");
-    REQUIRE(result == 0);
-
-    output = run_command("bpftool prog show", &result);
-    REQUIRE(output == "196609: xdp  name lookup\n\n");
+        output == "\n\n"
+                  "    ID  Pins  Links  Mode       Type           Name\n"
+                  "======  ====  =====  =========  =============  ====================\n" +
+                      id + "     1      0  JIT        xdp            lookup\n");
     REQUIRE(result == 0);
 
     // Netsh currently outputs a spurious "Program not found" after the delete.
-    output = run_command("netsh ebpf delete prog 196609", &result);
+    output = run_command(("netsh ebpf delete prog " + id).c_str(), &result);
     REQUIRE(
-        output == "Unpinned 196609 from map_in_map\n"
-                  "Program not found\n\n");
-    REQUIRE(result == 0);
+        output == "\nUnpinned " + id +
+                      " from map_in_map\n"
+                      "Program not found\n");
+    REQUIRE(result == 1);
 
     output = run_command("bpftool prog show", &result);
     REQUIRE(output == "");
     REQUIRE(result == 0);
 }
 
-TEST_CASE("map create", "[!shouldfail][map]")
+TEST_CASE("map create", "[map]")
 {
     int status;
     std::string output =
@@ -135,7 +114,22 @@ TEST_CASE("map create", "[!shouldfail][map]")
     REQUIRE(output == "");
     REQUIRE(status == 0);
 
-    output = run_command("bpftool map dump id 65537", &status);
+    output = run_command("bpftool map show", &status);
+    REQUIRE(status == 0);
+    std::string id = std::to_string(atoi(output.c_str()));
+    REQUIRE(output == id + ": array  name Name  flags 0x0\n\tkey 4B  value 4B  max_entries 2\n");
+
+    output = run_command("netsh ebpf show maps", &status);
+    REQUIRE(status == 0);
+    REQUIRE(
+        output == "\n\n"
+                  "                             Key  Value      Max  Inner\n"
+                  "    ID            Map Type  Size   Size  Entries     ID  Pins  Name\n"
+                  "======  ==================  ====  =====  =======  =====  ====  ========\n"
+                  " " +
+                      id + "               Array     4      4        2     -1     1  Name\n");
+
+    output = run_command(("bpftool map dump id " + id).c_str(), &status);
     REQUIRE(
         output == "key: 00 00 00 00  value: 00 00 00 00\n"
                   "key: 01 00 00 00  value: 00 00 00 00\n"
