@@ -318,6 +318,7 @@ function Install-eBPFComponentsOnVM
 
         # If the install succeeded, this should show bpftool usage.
         # TODO: this step currently fails!
+        dir "$env:windir\System32\bpftool.exe"
         bpftool.exe
 
         # TODO: remove the following DEBUG output lines.

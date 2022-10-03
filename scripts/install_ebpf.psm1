@@ -133,8 +133,12 @@ function Install-eBPFComponents
     param([parameter(Mandatory=$false)] [bool] $Tracing = $false,
           [parameter(Mandatory=$false)] [bool] $KMDFVerifier = $false)
 
+    Write-Log "DEBUG: Install-eBPFComponents stopping ebpf components..."
+
     # Stop eBPF Components
     Stop-eBPFComponents
+
+    Write-Log "DEBUG: Install-eBPFComponents copying all binaries to system32..."
 
     # Copy all binaries to system32.
     Copy-Item *.sys -Destination "$Env:systemroot\system32\drivers" -Force -ErrorAction Stop 2>&1 | Write-Log
@@ -147,19 +151,26 @@ function Install-eBPFComponents
     Copy-Item *.dll -Destination "$Env:systemroot\system32" -Force -ErrorAction Stop 2>&1 | Write-Log
     Copy-Item *.exe -Destination "$Env:systemroot\system32" -Force -ErrorAction Stop 2>&1 | Write-Log
 
+    Write-Log "DEBUG: Install-eBPFComponents registering components..."
+
     # Register all components.
     Register-eBPFComponents
 
     if ($KMDFVerifier) {
+        Write-Log "DEBUG: Install-eBPFComponents enabling KMDF verifier..."
+
         # Enable KMDF verifier and tag tracking.
         Enable-KMDFVerifier
     }
+
+    Write-Log "DEBUG: Install-eBPFComponents starting components..."
 
     # Start all components.
     Start-eBPFComponents -Tracing $Tracing
 
     ## TODO: Issue 1231, remove this step when this issue is fixed.
     # Update eBPF store.
+    Write-Log "DEBUG: Install-eBPFComponents updating ebpf store..."
     Update-eBPFStore
 }
 
