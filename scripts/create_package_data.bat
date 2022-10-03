@@ -38,8 +38,10 @@ mkdir package_data\testing
 copy api_test.exe package_data\testing
 copy api_test.pdb package_data\testing
 copy bindmonitor.o package_data\testing
+copy bindmonitor.sys package_data\testing
 copy bindmonitor_ringbuf.o package_data\testing
 copy bindmonitor_tailcall.o package_data\testing
+copy bindmonitor_tailcall.sys package_data\testing
 copy bpf.o package_data\testing
 copy bpf_call.o package_data\testing
 copy bpftool.pdb package_data\testing
@@ -49,6 +51,7 @@ copy cgroup_sock_addr.o package_data\testing
 copy decap_permit_packet.o package_data\testing
 copy divide_by_zero.o package_data\testing
 copy droppacket.o package_data\testing
+copy droppacket.sys package_data\testing
 copy droppacket_um.dll package_data\testing
 copy droppacket_um.pdb package_data\testing
 copy droppacket_unsafe.o package_data\testing
@@ -61,6 +64,7 @@ copy map_in_map_v2.o package_data\testing
 copy map_reuse.o package_data\testing
 copy map_reuse_2.o package_data\testing
 copy pidtgid.o package_data\testing
+copy pidtgid.sys package_data\testing
 copy printk.o package_data\testing
 copy printk_unsafe.o package_data\testing
 copy reflect_packet.o package_data\testing
