@@ -1,13 +1,68 @@
 // Copyright (c) Microsoft Corporation
 // SPDX-License-Identifier: MIT
+#include <iostream>
 
 #include "nmr_impl.h"
 
 #define NMR_WAIT_TIMEOUT_SECONDS 10
 
+#include "ebpf_program_attach_type_guids.h"
+#include "ebpf_extension_uuids.h"
+bool
+CheckIfGuid(GUID guid, GUID value, const char* str, std::string& output)
+{
+    if (memcmp(&guid, &value, sizeof(guid)) == 0) {
+        output += "(" + std::string(str) + ")";
+        return true;
+    }
+    return false;
+}
+#define CHECK_IF_GUID(value)                      \
+    if (CheckIfGuid(guid, value, #value, output)) \
+        return output;
+std::string
+GuidToString(GUID guid)
+{
+    char buffer[120];
+    sprintf_s(
+        buffer, sizeof(buffer), "...%02x%02x%02x%02x", guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+    std::string output(buffer);
+
+    CHECK_IF_GUID(EBPF_PROGRAM_INFO_EXTENSION_IID);
+    CHECK_IF_GUID(EBPF_HOOK_EXTENSION_IID);
+    CHECK_IF_GUID(EBPF_PROGRAM_TYPE_XDP);
+    CHECK_IF_GUID(EBPF_PROGRAM_TYPE_BIND);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_XDP);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_BIND);
+    CHECK_IF_GUID(EBPF_PROGRAM_TYPE_CGROUP_SOCK_ADDR);
+    CHECK_IF_GUID(EBPF_PROGRAM_TYPE_SOCK_OPS);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_CGROUP_INET4_CONNECT);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_CGROUP_INET6_CONNECT);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_CGROUP_INET4_RECV_ACCEPT);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_CGROUP_INET6_RECV_ACCEPT);
+    CHECK_IF_GUID(EBPF_ATTACH_TYPE_CGROUP_SOCK_OPS);
+
+    if (guid.Data4[6] == 0x80 && guid.Data4[7] == 0xcb) {
+        output += "(_ebpf_native_npi_id)";
+    } else if (guid.Data4[6] == 0x30 && guid.Data4[7] == 0xa7) {
+        output += "(_ebpf_native_provider_id)";
+    } else if (guid.Data4[6] == 0x81 && guid.Data4[7] == 0xfe) {
+        output += "(ebpf_general_helper_function_module_id)";
+    } else if (guid.Data4[6] == 0x0b && guid.Data4[7] == 0x82) {
+        output += "(netebpf_ext_helper_t)";
+    } else if (guid.Data4[6] == 0x2d && guid.Data4[7] == 0xc6) {
+        output += "(netebpfext_fuzzer)";
+    } else {
+        output += "(???)";
+    }
+    return output;
+}
+
 _nmr::nmr_provider_handle
 _nmr::register_provider(_In_ const NPI_PROVIDER_CHARACTERISTICS& characteristics, _In_opt_ const void* context)
 {
+    std::cout << "REGISTER PROVIDER: NPI ID " << GuidToString(*characteristics.ProviderRegistrationInstance.NpiId)
+              << " MODULE " << GuidToString(characteristics.ProviderRegistrationInstance.ModuleId->Guid) << "\n";
     // Add the provider to the list of providers.
     nmr_provider_handle provider_handle = add(providers, characteristics, context);
     // Notify existing clients about the new provider.
@@ -41,6 +96,9 @@ _nmr::wait_for_deregister_provider(_In_ nmr_provider_handle provider_handle)
 _nmr::nmr_client_handle
 _nmr::register_client(_In_ const NPI_CLIENT_CHARACTERISTICS& characteristics, _In_opt_ const void* context)
 {
+    std::cout << "REGISTER CLIENT: NPI ID " << GuidToString(*characteristics.ClientRegistrationInstance.NpiId)
+              << " MODULE " << GuidToString(characteristics.ClientRegistrationInstance.ModuleId->Guid) << "\n";
+
     // Add the client to the list of clients.
     nmr_client_handle client_handle = add(clients, characteristics, context);
     // Notify existing providers about the new client.
@@ -123,6 +181,7 @@ _nmr::client_attach_provider(
     _Outptr_ const void** provider_dispatch)
 {
     std::unique_lock l(lock);
+
     // Resolve the binding_handle to the binding.
     auto it = bindings.find(binding_handle);
     if (it == bindings.end()) {
@@ -162,6 +221,10 @@ _nmr::bind(_Inout_ client_registration& client, _Inout_ provider_registration& p
         *provider.characteristics.ProviderRegistrationInstance.NpiId) {
         return std::nullopt;
     }
+    std::cout << "BIND NPI ID " << GuidToString(*client.characteristics.ClientRegistrationInstance.NpiId)
+              << " CLIENT MODULE " << GuidToString(client.characteristics.ClientRegistrationInstance.ModuleId->Guid)
+              << " PROVIDER MODULE "
+              << GuidToString(provider.characteristics.ProviderRegistrationInstance.ModuleId->Guid) << "\n";
 
     // Skip if client or provider are deregistering.
     if (client.deregistering || provider.deregistering) {
@@ -194,6 +257,12 @@ void
 _nmr::unbind_complete(_Inout_ binding& binding)
 {
     std::unique_lock l(lock);
+    std::cout << "UNBIND NPI ID " << GuidToString(*binding.client.characteristics.ClientRegistrationInstance.NpiId)
+              << " CLIENT MODULE "
+              << GuidToString(binding.client.characteristics.ClientRegistrationInstance.ModuleId->Guid)
+              << " PROVIDER MODULE "
+              << GuidToString(binding.provider.characteristics.ProviderRegistrationInstance.ModuleId->Guid) << "\n";
+
     if (binding.client.characteristics.ClientCleanupBindingContext != nullptr) {
         // Notify the client that that the binding context can be freed if needed.
         binding.client.characteristics.ClientCleanupBindingContext(const_cast<void*>(binding.client_binding_context));
@@ -224,6 +293,12 @@ _nmr::begin_unbind(_Inout_ binding& binding)
     binding.client_binding_status = BeginUnbind;
     binding.provider_binding_status = BeginUnbind;
     l.unlock();
+
+    std::cout << "BEGIN UNBIND: NPI ID "
+              << GuidToString(*binding.client.characteristics.ClientRegistrationInstance.NpiId) << " CLIENT MODULE "
+              << GuidToString(binding.client.characteristics.ClientRegistrationInstance.ModuleId->Guid)
+              << " PROVIDER MODULE "
+              << GuidToString(binding.provider.characteristics.ProviderRegistrationInstance.ModuleId->Guid) << "\n";
 
     NTSTATUS client_detach_provider_status =
         (binding.client_binding_context)

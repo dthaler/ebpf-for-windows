@@ -33,6 +33,9 @@ _analyze(raw_program& raw_prog, const char** error_message, uint32_t* error_mess
         std::ostringstream oss;
         options.no_simplify = true;
         options.print_failures = true;
+#if 1
+        options.print_invariants = true;
+#endif
         (void)ebpf_verify_program(oss, prog, raw_prog.info, &options, &stats);
 
         *error_message = allocate_string(oss.str(), error_message_size);
