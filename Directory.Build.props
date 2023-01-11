@@ -27,6 +27,11 @@
     <AdditionalOptions>/fsanitize-coverage=inline-bool-flag /fsanitize-coverage=edge /fsanitize-coverage=trace-cmp /fsanitize-coverage=trace-div %(AdditionalOptions)</AdditionalOptions>
     <SanitizerLibs>libsancov.lib;clang_rt.fuzzer_MDd-x86_64.lib</SanitizerLibs>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='FuzzerDebug'">
+    <EnableASAN>true</EnableASAN>
+    <AdditionalOptions>/fsanitize-coverage=inline-bool-flag /fsanitize-coverage=edge /fsanitize-coverage=trace-cmp /fsanitize-coverage=trace-div %(AdditionalOptions)</AdditionalOptions>
+    <SanitizerLibs>libsancov.lib;clang_rt.fuzzer_MDd-x86_64.lib</SanitizerLibs>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Fuzzer)'!='True'">
     <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
@@ -54,6 +59,13 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='FuzzerDebug'">
     <ClCompile>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
