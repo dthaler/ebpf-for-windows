@@ -50,12 +50,6 @@ ebpf_get_code_integrity_state(_Out_ ebpf_code_integrity_state_t* state)
     EBPF_RETURN_RESULT(EBPF_SUCCESS);
 }
 
-__drv_allocatesMem(Mem) _Must_inspect_result_ _Ret_writes_maybenull_(new_size) void* ebpf_reallocate(
-    _In_ _Post_invalid_ void* memory, size_t old_size, size_t new_size)
-{
-    return usersim_reallocate(memory, old_size, new_size);
-}
-
 __drv_allocatesMem(Mem) _Must_inspect_result_
     _Ret_writes_maybenull_(size) void* ebpf_allocate_cache_aligned(size_t size)
 {
@@ -76,13 +70,6 @@ ebpf_free_cache_aligned(_Frees_ptr_opt_ void* memory)
     _aligned_free(memory);
 }
 
-struct _ebpf_memory_descriptor
-{
-    void* base;
-    size_t length;
-};
-typedef struct _ebpf_memory_descriptor ebpf_memory_descriptor_t;
-
 struct _ebpf_ring_descriptor
 {
     void* primary_view;
@@ -90,41 +77,6 @@ struct _ebpf_ring_descriptor
     size_t length;
 };
 typedef struct _ebpf_ring_descriptor ebpf_ring_descriptor_t;
-
-ebpf_memory_descriptor_t*
-ebpf_map_memory(size_t length)
-{
-    // Skip fault injection for this VirtualAlloc OS API, as ebpf_allocate already does that.
-    ebpf_memory_descriptor_t* descriptor = (ebpf_memory_descriptor_t*)ebpf_allocate(sizeof(ebpf_memory_descriptor_t));
-    if (!descriptor) {
-        return nullptr;
-    }
-
-    descriptor->base = VirtualAlloc(0, length, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-    descriptor->length = length;
-
-    if (!descriptor->base) {
-        EBPF_LOG_WIN32_API_FAILURE(EBPF_TRACELOG_KEYWORD_BASE, VirtualAlloc);
-        ebpf_free(descriptor);
-        descriptor = nullptr;
-    }
-    return descriptor;
-}
-
-void
-ebpf_unmap_memory(_Frees_ptr_opt_ ebpf_memory_descriptor_t* memory_descriptor)
-{
-    EBPF_LOG_ENTRY();
-    if (!memory_descriptor) {
-        EBPF_RETURN_VOID();
-    }
-
-    if (!VirtualFree(memory_descriptor->base, 0, MEM_RELEASE)) {
-        EBPF_LOG_WIN32_API_FAILURE(EBPF_TRACELOG_KEYWORD_BASE, VirtualFree);
-    }
-    ExFreePool(memory_descriptor);
-    EBPF_RETURN_VOID();
-}
 
 // This code is derived from the sample at:
 // https://docs.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc2
@@ -320,20 +272,6 @@ ntstatus_to_ebpf_result(NTSTATUS status)
 {
     uint32_t error = ntstatus_to_win32_error_code(status);
     return win32_error_code_to_ebpf_result(error);
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_protect_memory(_In_ const ebpf_memory_descriptor_t* memory_descriptor, ebpf_page_protection_t protection)
-{
-    NTSTATUS status = usersim_protect_memory(
-        (const usersim_memory_descriptor_t*)memory_descriptor, (usersim_page_protection_t)protection);
-    return ntstatus_to_ebpf_result(status);
-}
-
-void*
-ebpf_memory_descriptor_get_base_address(ebpf_memory_descriptor_t* memory_descriptor)
-{
-    return memory_descriptor->base;
 }
 
 _Must_inspect_result_ ebpf_result_t
