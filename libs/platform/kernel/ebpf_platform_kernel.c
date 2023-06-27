@@ -5,11 +5,7 @@
 #include "ebpf_store_helper.h"
 #include "ebpf_tracelog.h"
 
-#include <ntstrsafe.h>
-
 IO_WORKITEM_ROUTINE _ebpf_preemptible_routine;
-
-static uint32_t _ebpf_platform_maximum_processor_count = 0;
 
 extern DEVICE_OBJECT*
 ebpf_driver_get_device_object();
@@ -28,7 +24,7 @@ static KDEFERRED_ROUTINE _ebpf_timer_routine;
 _Must_inspect_result_ ebpf_result_t
 ebpf_platform_initiate()
 {
-    _ebpf_platform_maximum_processor_count = KeQueryMaximumProcessorCountEx(ALL_PROCESSOR_GROUPS);
+    ebpf_initialize_cpu_count();
     return EBPF_SUCCESS;
 }
 
@@ -223,26 +219,6 @@ ebpf_get_code_integrity_state(_Out_ ebpf_code_integrity_state_t* state)
 }
 
 _Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_multiply(
-    size_t multiplicand, size_t multiplier, _Out_ _Deref_out_range_(==, multiplicand* multiplier) size_t* result)
-{
-    return RtlSizeTMult(multiplicand, multiplier, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_add(size_t augend, size_t addend, _Out_ _Deref_out_range_(==, augend + addend) size_t* result)
-{
-    return RtlSizeTAdd(augend, addend, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_subtract(
-    size_t minuend, size_t subtrahend, _Out_ _Deref_out_range_(==, minuend - subtrahend) size_t* result)
-{
-    return RtlSizeTSub(minuend, subtrahend, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-_Must_inspect_result_ ebpf_result_t
 ebpf_set_current_thread_affinity(uintptr_t new_thread_affinity_mask, _Out_ uintptr_t* old_thread_affinity_mask)
 {
     if (KeGetCurrentIrql() >= DISPATCH_LEVEL) {
@@ -253,8 +229,6 @@ ebpf_set_current_thread_affinity(uintptr_t new_thread_affinity_mask, _Out_ uintp
     *old_thread_affinity_mask = old_affinity;
     return EBPF_SUCCESS;
 }
-
-_Ret_range_(>, 0) uint32_t ebpf_get_cpu_count() { return _ebpf_platform_maximum_processor_count; }
 
 typedef struct _ebpf_non_preemptible_work_item
 {
@@ -513,37 +487,6 @@ Done:
     return result;
 }
 
-uint32_t
-ebpf_random_uint32()
-{
-    LARGE_INTEGER p = KeQueryPerformanceCounter(NULL);
-    unsigned long seed = p.LowPart ^ (unsigned long)p.HighPart;
-    return RtlRandomEx(&seed);
-}
-
-// Pick an arbitrary limit on string size roughly based on the size of the eBPF stack.
-// This is enough space for a format string that takes up all the eBPF stack space,
-// plus room to expand three 64-bit integer arguments from 2-character format specifiers.
-#define MAX_PRINTK_STRING_SIZE 554
-
-long
-ebpf_platform_printk(_In_z_ const char* format, va_list arg_list)
-{
-    char* output = (char*)ebpf_allocate(MAX_PRINTK_STRING_SIZE);
-    if (output == NULL) {
-        return -1;
-    }
-
-    long bytes_written = -1;
-    if (RtlStringCchVPrintfA(output, MAX_PRINTK_STRING_SIZE, format, arg_list) == 0) {
-        EBPF_LOG_MESSAGE(EBPF_TRACELOG_LEVEL_INFO, EBPF_TRACELOG_KEYWORD_PRINTK, output);
-        bytes_written = (long)strlen(output);
-    }
-
-    ebpf_free(output);
-    return bytes_written;
-}
-
 _Must_inspect_result_ ebpf_result_t
 ebpf_update_global_helpers(
     _In_reads_(helper_info_count) ebpf_helper_function_prototype_t* helper_info, uint32_t helper_info_count)
@@ -586,40 +529,4 @@ void
 ebpf_semaphore_destroy(_Frees_ptr_opt_ ebpf_semaphore_t* semaphore)
 {
     ebpf_free(semaphore);
-}
-
-ebpf_result_t
-ebpf_utf8_string_to_unicode(_In_ const ebpf_utf8_string_t* input, _Outptr_ wchar_t** output)
-{
-    wchar_t* unicode_string = NULL;
-    unsigned long unicode_byte_count = 0;
-    ebpf_result_t retval;
-
-    (void)RtlUTF8ToUnicodeN(NULL, 0, &unicode_byte_count, (const char*)input->value, (unsigned long)input->length);
-
-    unicode_string = (wchar_t*)ebpf_allocate(unicode_byte_count + sizeof(wchar_t));
-    if (unicode_string == NULL) {
-        retval = EBPF_NO_MEMORY;
-        goto Done;
-    }
-
-    NTSTATUS status = RtlUTF8ToUnicodeN(
-        unicode_string,
-        unicode_byte_count,
-        &unicode_byte_count,
-        (const char*)input->value,
-        (unsigned long)input->length);
-
-    if (!NT_SUCCESS(status)) {
-        retval = EBPF_INVALID_ARGUMENT;
-        goto Done;
-    }
-
-    *output = unicode_string;
-    unicode_string = NULL;
-    retval = EBPF_SUCCESS;
-
-Done:
-    ebpf_free(unicode_string);
-    return retval;
 }

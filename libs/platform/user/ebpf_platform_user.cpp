@@ -4,6 +4,7 @@
 #include "..\..\external\usersim\src\platform.h"
 #include "ebpf_tracelog.h"
 #include "ebpf_utilities.h"
+#include "usersim/ke.h"
 
 #include <TraceLoggingProvider.h>
 #include <functional>
@@ -11,7 +12,6 @@
 #include <map>
 #include <mutex>
 #include <queue>
-#include <random>
 #include <set>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,6 +27,7 @@ extern "C" size_t ebpf_fuzzing_memory_limit = MAXSIZE_T;
 _Must_inspect_result_ ebpf_result_t
 ebpf_platform_initiate()
 {
+    ebpf_initialize_cpu_count();
     return NT_SUCCESS(usersim_platform_initiate()) ? EBPF_SUCCESS : EBPF_NO_MEMORY;
 }
 
@@ -34,6 +35,7 @@ void
 ebpf_platform_terminate()
 {
     usersim_platform_terminate();
+    KeFlushQueuedDpcs();
 }
 
 _Must_inspect_result_ ebpf_result_t
@@ -246,8 +248,8 @@ ebpf_ring_map_readonly_user(_In_ const ebpf_ring_descriptor_t* ring)
     EBPF_RETURN_POINTER(void*, ebpf_ring_descriptor_get_base_address(ring));
 }
 
-uint32_t
-ntstatus_to_win32_error_code(NTSTATUS status)
+static uint32_t
+_ntstatus_to_win32_error_code(NTSTATUS status)
 {
     static uint32_t (*RtlNtStatusToDosError)(NTSTATUS Status) = nullptr;
     if (!RtlNtStatusToDosError) {
@@ -264,42 +266,14 @@ ntstatus_to_win32_error_code(NTSTATUS status)
 uint32_t
 ebpf_result_to_win32_error_code(ebpf_result_t result)
 {
-    return ntstatus_to_win32_error_code(ebpf_result_to_ntstatus(result));
+    return _ntstatus_to_win32_error_code(ebpf_result_to_ntstatus(result));
 }
 
 ebpf_result_t
 ntstatus_to_ebpf_result(NTSTATUS status)
 {
-    uint32_t error = ntstatus_to_win32_error_code(status);
+    uint32_t error = _ntstatus_to_win32_error_code(status);
     return win32_error_code_to_ebpf_result(error);
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_multiply(
-    size_t multiplicand, size_t multiplier, _Out_ _Deref_out_range_(==, multiplicand* multiplier) size_t* result)
-{
-    return SUCCEEDED(SizeTMult(multiplicand, multiplier, result)) ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_add(size_t augend, size_t addend, _Out_ _Deref_out_range_(==, augend + addend) size_t* result)
-{
-    return SUCCEEDED(SizeTAdd(augend, addend, result)) ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-_Must_inspect_result_ ebpf_result_t
-ebpf_safe_size_t_subtract(
-    size_t minuend, size_t subtrahend, _Out_ _Deref_out_range_(==, minuend - subtrahend) size_t* result)
-{
-    return SUCCEEDED(SizeTSub(minuend, subtrahend, result)) ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
-}
-
-uint32_t
-ebpf_random_uint32()
-{
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    return mt();
 }
 
 _Must_inspect_result_ ebpf_result_t
@@ -319,8 +293,6 @@ ebpf_set_current_thread_affinity(uintptr_t new_thread_affinity_mask, _Out_ uintp
         return EBPF_SUCCESS;
     }
 }
-
-_Ret_range_(>, 0) uint32_t ebpf_get_cpu_count() { return usersim_get_cpu_count(); }
 
 _Must_inspect_result_ ebpf_result_t
 ebpf_allocate_non_preemptible_work_item(
@@ -495,28 +467,6 @@ ebpf_platform_printk_output()
     return std::move(_ebpf_platform_printk_output);
 }
 
-long
-ebpf_platform_printk(_In_z_ const char* format, va_list arg_list)
-{
-    int bytes_written = vprintf(format, arg_list);
-    if (bytes_written >= 0) {
-        putchar('\n');
-        bytes_written++;
-    }
-
-    std::string output;
-    output.resize(bytes_written);
-
-    vsprintf_s(output.data(), output.size(), format, arg_list);
-    // Remove the trailing null.
-    output.pop_back();
-
-    std::unique_lock<std::mutex> lock(_ebpf_platform_printk_output_lock);
-    _ebpf_platform_printk_output.emplace_back(std::move(output));
-
-    return bytes_written;
-}
-
 _Must_inspect_result_ ebpf_result_t
 ebpf_update_global_helpers(
     _In_reads_(helper_info_count) ebpf_helper_function_prototype_t* helper_info, uint32_t helper_info_count)
@@ -540,42 +490,4 @@ ebpf_semaphore_destroy(_Frees_ptr_opt_ ebpf_semaphore_t* semaphore)
         ::CloseHandle(semaphore->handle);
         ebpf_free(semaphore);
     }
-}
-
-ebpf_result_t
-ebpf_utf8_string_to_unicode(_In_ const ebpf_utf8_string_t* input, _Outptr_ wchar_t** output)
-{
-    wchar_t* unicode_string = NULL;
-    ebpf_result_t retval;
-
-    // Compute the size needed to hold the unicode string.
-    int result = MultiByteToWideChar(CP_UTF8, 0, (const char*)input->value, (int)input->length, NULL, 0);
-
-    if (result <= 0) {
-        retval = EBPF_INVALID_ARGUMENT;
-        goto Done;
-    }
-
-    result++;
-
-    unicode_string = (wchar_t*)ebpf_allocate(result * sizeof(wchar_t));
-    if (unicode_string == NULL) {
-        retval = EBPF_NO_MEMORY;
-        goto Done;
-    }
-
-    result = MultiByteToWideChar(CP_UTF8, 0, (const char*)input->value, (int)input->length, unicode_string, result);
-
-    if (result == 0) {
-        retval = EBPF_INVALID_ARGUMENT;
-        goto Done;
-    }
-
-    *output = unicode_string;
-    unicode_string = NULL;
-    retval = EBPF_SUCCESS;
-
-Done:
-    ebpf_free(unicode_string);
-    return retval;
 }

@@ -399,6 +399,12 @@ extern "C"
     _Ret_range_(>, 0) uint32_t ebpf_get_cpu_count();
 
     /**
+     * @brief Initialize the CPU count.
+     */
+    void
+    ebpf_initialize_cpu_count();
+
+    /**
      * @brief Query the platform to determine if the current execution can
      *    be preempted by other execution.
      * @retval True if this execution can be preempted.

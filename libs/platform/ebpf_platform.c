@@ -6,6 +6,16 @@
 
 bool ebpf_fuzzing_enabled = false;
 
+static uint32_t _ebpf_platform_maximum_processor_count = 0;
+
+_Ret_range_(>, 0) uint32_t ebpf_get_cpu_count() { return _ebpf_platform_maximum_processor_count; }
+
+void
+ebpf_initialize_cpu_count()
+{
+    _ebpf_platform_maximum_processor_count = KeQueryMaximumProcessorCountEx(ALL_PROCESSOR_GROUPS);
+}
+
 typedef struct _ebpf_process_state
 {
     KAPC_STATE state;
@@ -328,4 +338,96 @@ ebpf_memory_descriptor_get_base_address(MDL* memory_descriptor)
         EBPF_LOG_NTSTATUS_API_FAILURE(EBPF_TRACELOG_KEYWORD_BASE, MmGetSystemAddressForMdlSafe, STATUS_NO_MEMORY);
     }
     return address;
+}
+
+_Must_inspect_result_ ebpf_result_t
+ebpf_safe_size_t_multiply(
+    size_t multiplicand, size_t multiplier, _Out_ _Deref_out_range_(==, multiplicand* multiplier) size_t* result)
+{
+    return RtlSizeTMult(multiplicand, multiplier, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
+}
+
+_Must_inspect_result_ ebpf_result_t
+ebpf_safe_size_t_add(size_t augend, size_t addend, _Out_ _Deref_out_range_(==, augend + addend) size_t* result)
+{
+    return RtlSizeTAdd(augend, addend, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
+}
+
+_Must_inspect_result_ ebpf_result_t
+ebpf_safe_size_t_subtract(
+    size_t minuend, size_t subtrahend, _Out_ _Deref_out_range_(==, minuend - subtrahend) size_t* result)
+{
+    return RtlSizeTSub(minuend, subtrahend, result) == STATUS_SUCCESS ? EBPF_SUCCESS : EBPF_ARITHMETIC_OVERFLOW;
+}
+
+uint32_t
+ebpf_random_uint32()
+{
+    LARGE_INTEGER p = KeQueryPerformanceCounter(NULL);
+    unsigned long seed = p.LowPart ^ (unsigned long)p.HighPart;
+    return RtlRandomEx(&seed);
+}
+
+// Pick an arbitrary limit on string size roughly based on the size of the eBPF stack.
+// This is enough space for a format string that takes up all the eBPF stack space,
+// plus room to expand three 64-bit integer arguments from 2-character format specifiers.
+#define MAX_PRINTK_STRING_SIZE 554
+
+long
+ebpf_platform_printk(_In_z_ const char* format, va_list arg_list)
+{
+    char* output = (char*)ebpf_allocate(MAX_PRINTK_STRING_SIZE);
+    if (output == NULL) {
+        return -1;
+    }
+
+    long bytes_written = -1;
+    if (RtlStringCchVPrintfA(output, MAX_PRINTK_STRING_SIZE, format, arg_list) == 0) {
+        EBPF_LOG_MESSAGE(EBPF_TRACELOG_LEVEL_INFO, EBPF_TRACELOG_KEYWORD_PRINTK, output);
+        bytes_written = (long)strlen(output);
+    }
+
+    ebpf_free(output);
+    return bytes_written;
+}
+
+ebpf_result_t
+ebpf_utf8_string_to_unicode(_In_ const ebpf_utf8_string_t* input, _Outptr_ wchar_t** output)
+{
+    wchar_t* unicode_string = NULL;
+    unsigned long unicode_byte_count = 0;
+    ebpf_result_t retval;
+
+    // Compute the size needed to hold the unicode string.
+    NTSTATUS status =
+        RtlUTF8ToUnicodeN(NULL, 0, &unicode_byte_count, (const char*)input->value, (unsigned long)input->length);
+    if (!NT_SUCCESS(status)) {
+        return EBPF_INVALID_ARGUMENT;
+    }
+
+    unicode_string = (wchar_t*)ebpf_allocate(unicode_byte_count + sizeof(wchar_t));
+    if (unicode_string == NULL) {
+        retval = EBPF_NO_MEMORY;
+        goto Done;
+    }
+
+    status = RtlUTF8ToUnicodeN(
+        unicode_string,
+        unicode_byte_count,
+        &unicode_byte_count,
+        (const char*)input->value,
+        (unsigned long)input->length);
+
+    if (!NT_SUCCESS(status)) {
+        retval = EBPF_INVALID_ARGUMENT;
+        goto Done;
+    }
+
+    *output = unicode_string;
+    unicode_string = NULL;
+    retval = EBPF_SUCCESS;
+
+Done:
+    ebpf_free(unicode_string);
+    return retval;
 }
