@@ -94,7 +94,7 @@ find_or_create_process_entry(bind_md_t* ctx)
         return entry;
     }
 
-#if 0
+#if 1
     for (index = 0; index < 64; index++) {
         if ((ctx->app_id_start + index) >= ctx->app_id_end) {
             break;
