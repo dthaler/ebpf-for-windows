@@ -20,6 +20,15 @@ extern "C"
 {
 #endif
 
+/**
+ * @brief Hint to compiler that this function should be inlined during link time code generation.
+ */
+#if defined(NDEBUG)
+#define EBPF_INLINE_HINT extern __forceinline
+#else
+#define EBPF_INLINE_HINT
+#endif
+
 #define EBPF_UTF8_STRING_FROM_CONST_STRING(x) \
     {                                         \
         ((uint8_t*)(x)), sizeof((x)) - 1      \
@@ -242,6 +251,7 @@ extern "C"
      *    be preempted by other execution.
      * @retval True if this execution can be preempted.
      */
+    EBPF_INLINE_HINT
     bool
     ebpf_is_preemptible();
 
@@ -378,6 +388,46 @@ extern "C"
      */
     int64_t
     ebpf_interlocked_decrement_int64(_Inout_ volatile int64_t* addend);
+
+    /**
+     * @brief Atomically increase the value of addend by 1 and return the new
+     *  value.
+     *
+     * @param[in, out] addend Value to increase by 1.
+     * @return The new value.
+     */
+    int32_t
+    ebpf_interlocked_increment_int32_no_fence(_Inout_ volatile int32_t* addend);
+
+    /**
+     * @brief Atomically decrease the value of addend by 1 and return the new
+     *  value.
+     *
+     * @param[in, out] addend Value to decrease by 1.
+     * @return The new value.
+     */
+    int32_t
+    ebpf_interlocked_decrement_int32_no_fence(_Inout_ volatile int32_t* addend);
+
+    /**
+     * @brief Atomically increase the value of addend by 1 and return the new
+     *  value.
+     *
+     * @param[in, out] addend Value to increase by 1.
+     * @return The new value.
+     */
+    int64_t
+    ebpf_interlocked_increment_int64_no_fence(_Inout_ volatile int64_t* addend);
+
+    /**
+     * @brief Atomically decrease the value of addend by 1 and return the new
+     *  value.
+     *
+     * @param[in, out] addend Value to increase by 1.
+     * @return The new value.
+     */
+    int64_t
+    ebpf_interlocked_decrement_int64_no_fence(_Inout_ volatile int64_t* addend);
 
     /**
      * @brief Performs an atomic operation that compares the input value pointed
@@ -608,6 +658,7 @@ extern "C"
      * @param[in] include_suspended_time Include time the system spent in a suspended state.
      * @return Time elapsed since boot in 100 nanosecond units.
      */
+    EBPF_INLINE_HINT
     uint64_t
     ebpf_query_time_since_boot(bool include_suspended_time);
 
@@ -653,6 +704,7 @@ extern "C"
      *
      * @returns Process ID.
      */
+    EBPF_INLINE_HINT
     uint32_t
     ebpf_platform_process_id();
 
@@ -661,6 +713,7 @@ extern "C"
      *
      * @returns Thread ID.
      */
+    EBPF_INLINE_HINT
     uint32_t
     ebpf_platform_thread_id();
 
@@ -799,6 +852,7 @@ extern "C"
      *
      * @return result of the operation.
      */
+    EBPF_INLINE_HINT
     _IRQL_requires_max_(PASSIVE_LEVEL) _Must_inspect_result_ ebpf_result_t
         ebpf_platform_get_authentication_id(_Out_ uint64_t* authentication_id);
 
@@ -873,6 +927,8 @@ extern "C"
 
     _Ret_notnull_ DEVICE_OBJECT*
     ebpf_driver_get_device_object();
+
+    extern bool ebpf_processor_supports_sse42;
 
 #ifdef __cplusplus
 }

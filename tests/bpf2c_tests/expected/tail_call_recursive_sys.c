@@ -173,6 +173,7 @@ _get_hash(_Outptr_result_buffer_maybenull_(*size) const uint8_t** hash, _Out_ si
     *hash = NULL;
     *size = 0;
 }
+
 #pragma data_seg(push, "maps")
 static map_entry_t _maps[] = {
     {NULL,
@@ -228,7 +229,7 @@ recurse(void* context)
 #line 45 "sample/undocked/tail_call_recursive.c"
 {
 #line 45 "sample/undocked/tail_call_recursive.c"
-    // Prologue
+    // Prologue.
 #line 45 "sample/undocked/tail_call_recursive.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 45 "sample/undocked/tail_call_recursive.c"
@@ -277,7 +278,7 @@ recurse(void* context)
     r1 = POINTER(_maps[1].address);
     // EBPF_OP_CALL pc=7 dst=r0 src=r0 offset=0 imm=1
 #line 51 "sample/undocked/tail_call_recursive.c"
-    r0 = recurse_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = recurse_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 51 "sample/undocked/tail_call_recursive.c"
     if ((recurse_helpers[0].tail_call) && (r0 == 0)) {
 #line 51 "sample/undocked/tail_call_recursive.c"
@@ -326,7 +327,7 @@ recurse(void* context)
     r2 = IMMEDIATE(20);
     // EBPF_OP_CALL pc=22 dst=r0 src=r0 offset=0 imm=13
 #line 56 "sample/undocked/tail_call_recursive.c"
-    r0 = recurse_helpers[1].address(r1, r2, r3, r4, r5);
+    r0 = recurse_helpers[1].address(r1, r2, r3, r4, r5, context);
 #line 56 "sample/undocked/tail_call_recursive.c"
     if ((recurse_helpers[1].tail_call) && (r0 == 0)) {
 #line 56 "sample/undocked/tail_call_recursive.c"
@@ -353,7 +354,7 @@ recurse(void* context)
     r3 = IMMEDIATE(1);
     // EBPF_OP_CALL pc=30 dst=r0 src=r0 offset=0 imm=5
 #line 62 "sample/undocked/tail_call_recursive.c"
-    r0 = recurse_helpers[2].address(r1, r2, r3, r4, r5);
+    r0 = recurse_helpers[2].address(r1, r2, r3, r4, r5, context);
 #line 62 "sample/undocked/tail_call_recursive.c"
     if ((recurse_helpers[2].tail_call) && (r0 == 0)) {
 #line 62 "sample/undocked/tail_call_recursive.c"
@@ -370,7 +371,7 @@ label_1:
     // EBPF_OP_EXIT pc=33 dst=r0 src=r0 offset=0 imm=0
 #line 63 "sample/undocked/tail_call_recursive.c"
     return r0;
-#line 63 "sample/undocked/tail_call_recursive.c"
+#line 45 "sample/undocked/tail_call_recursive.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -405,7 +406,7 @@ static void
 _get_version(_Out_ bpf2c_version_t* version)
 {
     version->major = 0;
-    version->minor = 17;
+    version->minor = 20;
     version->revision = 0;
 }
 

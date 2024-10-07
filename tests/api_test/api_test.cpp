@@ -69,17 +69,18 @@ static service_install_helper
     _ebpf_service_helper(EBPF_SERVICE_NAME, EBPF_SERVICE_BINARY_NAME, SERVICE_WIN32_OWN_PROCESS);
 #endif
 
-static int
-_program_load_helper(
-    const char* file_name,
+static _Success_(return == 0) int _program_load_helper(
+    _In_z_ const char* file_name,
     bpf_prog_type prog_type,
     ebpf_execution_type_t execution_type,
-    struct bpf_object** object,
-    fd_t* program_fd)
+    _Outptr_ struct bpf_object** object,
+    _Out_ fd_t* program_fd) // File descriptor of first program in the object.
 {
+    *program_fd = ebpf_fd_invalid;
+    *object = nullptr;
     struct bpf_object* new_object = bpf_object__open(file_name);
     if (new_object == nullptr) {
-        return EBPF_FAILED;
+        return -EINVAL;
     }
 
     REQUIRE(ebpf_object_set_execution_type(new_object, execution_type) == EBPF_SUCCESS);
@@ -96,7 +97,9 @@ _program_load_helper(
         return error;
     }
 
-    *program_fd = bpf_program__fd(program);
+    if (program != nullptr) {
+        *program_fd = bpf_program__fd(program);
+    }
     *object = new_object;
     return 0;
 }
@@ -1079,51 +1082,6 @@ test_sock_addr_native_program_load_attach(const char* file_name)
 
 DECLARE_REGRESSION_TEST_CASE("0.11.0")
 
-// The below tests try to load native drivers for invalid programs (that will fail verification).
-// Since verification can be skipped in bpf2c for only Debug builds, these tests are applicable
-// only for Debug build.
-#ifdef _DEBUG
-
-static void
-_load_invalid_program(_In_z_ const char* file_name, ebpf_execution_type_t execution_type, int expected_result)
-{
-    int result;
-    bpf_object* object = nullptr;
-    fd_t program_fd;
-    uint32_t next_id;
-
-    result = _program_load_helper(file_name, BPF_PROG_TYPE_UNSPEC, execution_type, &object, &program_fd);
-    REQUIRE(result == expected_result);
-
-    if (result != 0) {
-        // If load failed, no programs or maps should be loaded.
-        REQUIRE(bpf_map_get_next_id(0, &next_id) == -ENOENT);
-        REQUIRE(bpf_prog_get_next_id(0, &next_id) == -ENOENT);
-    }
-}
-
-TEST_CASE("load_native_program_invalid1", "[native][negative]")
-{
-    _load_invalid_program("invalid_maps1.sys", EBPF_EXECUTION_NATIVE, -EINVAL);
-}
-TEST_CASE("load_native_program_invalid2", "[native][negative]")
-{
-    _load_invalid_program("invalid_maps2.sys", EBPF_EXECUTION_NATIVE, -EINVAL);
-}
-TEST_CASE("load_native_program_invalid3", "[native][negative]")
-{
-    _load_invalid_program("invalid_helpers.sys", EBPF_EXECUTION_NATIVE, -EINVAL);
-}
-TEST_CASE("load_native_program_invalid4", "[native][negative]")
-{
-    _load_invalid_program("empty.sys", EBPF_EXECUTION_NATIVE, -EINVAL);
-}
-TEST_CASE("load_native_program_invalid5", "[native][negative]")
-{
-    _load_invalid_program("invalid_maps3.sys", EBPF_EXECUTION_NATIVE, -EINVAL);
-}
-#endif // _DEBUG
-
 TEST_CASE("ioctl_stress", "[stress]")
 {
     // Load bindmonitor_ringbuf.sys
@@ -1310,6 +1268,52 @@ TEST_CASE("test_ringbuffer_wraparound", "[stress]")
 
     // Unsubscribe from the ring buffer.
     ring_buffer__free(ring);
+
+    // Clean up.
+    bpf_object__close(object);
+}
+
+TEST_CASE("Test program order", "[native_tests]")
+{
+    struct bpf_object* object = nullptr;
+    fd_t program_fd;
+    uint32_t program_count = 4;
+    int result;
+
+    REQUIRE(
+        _program_load_helper(
+            "multiple_programs.sys", BPF_PROG_TYPE_SAMPLE, EBPF_EXECUTION_NATIVE, &object, &program_fd) == 0);
+
+    // Get all 4 programs in the native object, and invoke them using bpf_prog_test_run.
+    //
+    // If there is a mismatch in the sorting order of bpf2c and ebpfapi, the 4 eBPF programs
+    // in this object file will be initialized with wrong handles. That will cause wrong programs
+    // to be invoked when bpf_prog_test_run is called. Since each program returns a different value,
+    // we can validate that the correct / expected program was invoked by checking the return value.
+    for (uint32_t i = 0; i < program_count; i++) {
+        bpf_test_run_opts opts = {};
+        bind_md_t ctx = {};
+        std::string program_name = "program" + std::to_string(i + 1);
+        struct bpf_program* program = bpf_object__find_program_by_name(object, program_name.c_str());
+        REQUIRE(program != nullptr);
+        program_fd = bpf_program__fd(program);
+        REQUIRE(program_fd > 0);
+
+        std::string app_id = "api_test.exe";
+
+        opts.ctx_in = &ctx;
+        opts.ctx_size_in = sizeof(ctx);
+        opts.ctx_out = &ctx;
+        opts.ctx_size_out = sizeof(ctx);
+        opts.data_in = app_id.data();
+        opts.data_size_in = static_cast<uint32_t>(app_id.size());
+        opts.data_out = app_id.data();
+        opts.data_size_out = static_cast<uint32_t>(app_id.size());
+
+        result = bpf_prog_test_run_opts(program_fd, &opts);
+        REQUIRE(result == 0);
+        REQUIRE(opts.retval == (i + 1));
+    }
 
     // Clean up.
     bpf_object__close(object);

@@ -38,6 +38,7 @@ _get_hash(_Outptr_result_buffer_maybenull_(*size) const uint8_t** hash, _Out_ si
     *hash = NULL;
     *size = 0;
 }
+
 #pragma data_seg(push, "maps")
 static map_entry_t _maps[] = {
     {NULL,
@@ -78,7 +79,7 @@ func(void* context)
 #line 25 "sample/undocked/atomic_instruction_fetch_add.c"
 {
 #line 25 "sample/undocked/atomic_instruction_fetch_add.c"
-    // Prologue
+    // Prologue.
 #line 25 "sample/undocked/atomic_instruction_fetch_add.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 25 "sample/undocked/atomic_instruction_fetch_add.c"
@@ -118,7 +119,7 @@ func(void* context)
     r1 = POINTER(_maps[0].address);
     // EBPF_OP_CALL pc=6 dst=r0 src=r0 offset=0 imm=1
 #line 28 "sample/undocked/atomic_instruction_fetch_add.c"
-    r0 = func_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = func_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 28 "sample/undocked/atomic_instruction_fetch_add.c"
     if ((func_helpers[0].tail_call) && (r0 == 0)) {
 #line 28 "sample/undocked/atomic_instruction_fetch_add.c"
@@ -145,7 +146,7 @@ label_1:
     // EBPF_OP_EXIT pc=11 dst=r0 src=r0 offset=0 imm=0
 #line 32 "sample/undocked/atomic_instruction_fetch_add.c"
     return r0;
-#line 32 "sample/undocked/atomic_instruction_fetch_add.c"
+#line 25 "sample/undocked/atomic_instruction_fetch_add.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -180,7 +181,7 @@ static void
 _get_version(_Out_ bpf2c_version_t* version)
 {
     version->major = 0;
-    version->minor = 17;
+    version->minor = 20;
     version->revision = 0;
 }
 

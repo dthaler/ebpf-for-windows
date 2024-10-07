@@ -15,6 +15,7 @@
 #include "ebpf_serialize.h"
 #include "ebpf_shared_framework.h"
 #include "ebpf_tracelog.h"
+#include "hash.h"
 #pragma warning(push)
 #pragma warning(disable : 4200) // Zero-sized array in struct/union
 #include "libbpf.h"
@@ -128,12 +129,7 @@ static std::mutex _pe_parse_mutex;
 
 static ebpf_result_t
 _ebpf_program_load_native(
-    _In_z_ const char* file_name,
-    _In_opt_ const ebpf_program_type_t* program_type,
-    _In_opt_ const ebpf_attach_type_t* attach_type,
-    ebpf_execution_type_t execution_type,
-    _Inout_ struct bpf_object* object,
-    _Out_ fd_t* program_fd) noexcept;
+    _In_z_ const char* file_name, ebpf_execution_type_t execution_type, _Inout_ struct bpf_object* object) noexcept;
 
 static _Ret_z_ const char*
 _ebpf_get_section_string(
@@ -466,10 +462,6 @@ _ebpf_map_lookup_element_helper(fd_t map_fd, bool find_and_delete, _In_opt_ cons
     uint32_t type;
 
     ebpf_assert(value);
-    if (map_fd <= 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Exit;
-    }
     *((uint8_t*)value) = 0;
 
     map_handle = _get_handle_from_file_descriptor(map_fd);
@@ -514,28 +506,23 @@ _ebpf_map_lookup_element_batch_helper(
 {
     EBPF_LOG_ENTRY();
     ebpf_result_t result = EBPF_SUCCESS;
-    ebpf_handle_t map_handle;
-    uint32_t key_size_u32;
-    uint32_t value_size_u32;
-    uint32_t max_entries_u32;
-    uint32_t type;
+    ebpf_handle_t map_handle = ebpf_handle_invalid;
+    uint32_t key_size_u32 = 0;
+    uint32_t value_size_u32 = 0;
+    uint32_t max_entries_u32 = 0;
+    uint32_t type = BPF_MAP_TYPE_UNSPEC;
 
     size_t input_count = *count;
     size_t count_returned = 0;
-    size_t max_entries_per_batch;
-    size_t key_size;
-    size_t value_size;
+    size_t max_entries_per_batch = 0;
+    size_t key_size = 0;
+    size_t value_size = 0;
 
     const uint8_t* previous_key = reinterpret_cast<const uint8_t*>(in_batch);
 
     ebpf_assert(keys);
     ebpf_assert(values);
     ebpf_assert(count);
-
-    if (map_fd <= 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Exit;
-    }
 
     if (*count == 0) {
         result = EBPF_INVALID_ARGUMENT;
@@ -560,6 +547,10 @@ _ebpf_map_lookup_element_batch_helper(
     if (key_size == 0 || value_size == 0 || input_count == 0) {
         result = EBPF_INVALID_ARGUMENT;
         goto Exit;
+    }
+
+    if (BPF_MAP_TYPE_PER_CPU(type)) {
+        value_size = EBPF_PAD_8(value_size) * libbpf_num_possible_cpus();
     }
 
     // Compute the maximum number of entries that can be updated in a single batch.
@@ -782,9 +773,8 @@ _update_map_element_batch(
                 uint8_t* source_value = (uint8_t*)value + (key_index + index) * value_size;
                 uint8_t* destination_key = request->data + index * (key_size + value_size);
                 uint8_t* destination_value = request->data + index * (key_size + value_size) + key_size;
-                if (key_size > 0) {
-                    std::copy(source_key, source_key + key_size, destination_key);
-                }
+
+                std::copy(source_key, source_key + key_size, destination_key);
                 std::copy(source_value, source_value + value_size, destination_value);
             }
 
@@ -849,9 +839,6 @@ ebpf_map_update_element(fd_t map_fd, _In_opt_ const void* key, _In_ const void* 
     uint32_t type;
 
     ebpf_assert(value);
-    if (map_fd <= 0) {
-        EBPF_RETURN_RESULT(EBPF_INVALID_ARGUMENT);
-    }
 
     switch (flags) {
     case EBPF_ANY:
@@ -910,20 +897,17 @@ ebpf_map_update_element_batch(
 {
     EBPF_LOG_ENTRY();
     ebpf_result_t result = EBPF_SUCCESS;
-    ebpf_handle_t map_handle;
-    uint32_t key_size_u32;
-    uint32_t value_size_u32;
-    uint32_t max_entries_u32;
-    size_t key_size;
-    size_t value_size;
+    ebpf_handle_t map_handle = ebpf_handle_invalid;
+    uint32_t key_size_u32 = 0;
+    uint32_t value_size_u32 = 0;
+    uint32_t max_entries_u32 = 0;
+    size_t key_size = 0;
+    size_t value_size = 0;
     size_t input_count = *count;
 
-    uint32_t type;
+    uint32_t type = BPF_MAP_TYPE_UNSPEC;
 
     ebpf_assert(values);
-    if (map_fd <= 0) {
-        EBPF_RETURN_RESULT(EBPF_INVALID_ARGUMENT);
-    }
 
     switch (flags) {
     case EBPF_ANY:
@@ -1000,10 +984,6 @@ ebpf_map_delete_element(fd_t map_fd, _In_ const void* key) NO_EXCEPT_TRY
     ebpf_operation_map_delete_element_request_t* request;
 
     ebpf_assert(key);
-    if (map_fd <= 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Exit;
-    }
 
     map_handle = _get_handle_from_file_descriptor(map_fd);
     if (map_handle == ebpf_handle_invalid) {
@@ -1072,10 +1052,6 @@ ebpf_map_delete_element_batch(fd_t map_fd, _In_ const void* keys, _Inout_ uint32
     }
 
     ebpf_assert(keys);
-    if (map_fd <= 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Exit;
-    }
 
     map_handle = _get_handle_from_file_descriptor(map_fd);
     if (map_handle == ebpf_handle_invalid) {
@@ -1165,11 +1141,6 @@ ebpf_map_get_next_key(fd_t map_fd, _In_opt_ const void* previous_key, _Out_ void
     ebpf_handle_t map_handle = ebpf_handle_invalid;
 
     ebpf_assert(next_key);
-
-    if (map_fd <= 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Exit;
-    }
 
     map_handle = _get_handle_from_file_descriptor(map_fd);
     if (map_handle == ebpf_handle_invalid) {
@@ -2097,14 +2068,23 @@ CATCH_NO_MEMORY_EBPF_RESULT
 static ebpf_result_t
 _initialize_ebpf_programs_native(
     size_t count_of_programs,
-    _In_reads_(count_of_programs) ebpf_handle_t* program_handles,
+    _Inout_updates_(count_of_programs) ebpf_handle_t* program_handles,
     _Inout_ std::vector<ebpf_program_t*>& programs) NO_EXCEPT_TRY
 {
     EBPF_LOG_ENTRY();
-    ebpf_assert(program_handles);
+    ebpf_assert(count_of_programs == 0 || program_handles);
     ebpf_result_t result = EBPF_SUCCESS;
 
     for (int i = 0; i < count_of_programs; i++) {
+        ebpf_program_t* program = programs[i];
+        if (!program->autoload) {
+#pragma warning(suppress : 6001) // The SAL annotation checks that program_handles[i] is ok.
+            if (program_handles[i] != ebpf_handle_invalid) {
+                Platform::CloseHandle(program_handles[i]);
+                program_handles[i] = ebpf_handle_invalid;
+            }
+            continue;
+        }
         if (program_handles[i] == ebpf_handle_invalid) {
             result = EBPF_INVALID_ARGUMENT;
             goto Exit;
@@ -2116,7 +2096,6 @@ _initialize_ebpf_programs_native(
             goto Exit;
         }
 
-        ebpf_program_t* program = programs[i];
         program->fd = _create_file_descriptor_for_handle(program_handles[i]);
         if (program->fd == ebpf_fd_invalid) {
             result = EBPF_NO_MEMORY;
@@ -2149,7 +2128,7 @@ _initialize_ebpf_object_native(
     ebpf_result_t result = EBPF_SUCCESS;
 
     ebpf_assert(count_of_maps == 0 || map_handles);
-    ebpf_assert(program_handles);
+    ebpf_assert(count_of_programs == 0 || program_handles);
 
     object.native_module_fd = native_module_fd;
 
@@ -2199,6 +2178,7 @@ _initialize_ebpf_object_from_native_file(
     _Outptr_result_maybenull_z_ const char** error_message) NO_EXCEPT_TRY
 {
     ebpf_program_t* program = nullptr;
+    ebpf_program_type_t empty_program_type{};
 
     EBPF_LOG_ENTRY();
     ebpf_assert(file_name);
@@ -2223,6 +2203,7 @@ _initialize_ebpf_object_from_native_file(
         program->program_type = info->program_type;
         program->attach_type = info->expected_attach_type;
         program->fd = ebpf_fd_invalid;
+        program->autoload = true;
 
         program->section_name = cxplat_duplicate_string(info->section_name);
         if (program->section_name == nullptr) {
@@ -3153,12 +3134,22 @@ ebpf_program_load_bytes(
         EBPF_RETURN_RESULT(EBPF_INVALID_ARGUMENT);
     }
 
-    char unique_name[80];
+    std::string program_hash_string;
     if (program_name == nullptr) {
-        // Create a unique object/section/program name.
-        srand(static_cast<unsigned int>(time(nullptr)));
-        sprintf_s(unique_name, sizeof(unique_name), "raw#%u", rand());
-        program_name = unique_name;
+        // If the program name isn't set, use the SHA256 hash of the instructions.
+        // This is also used as the object and section name.
+        // NOTE: we only keep the first 63 bytes of the hash to stay under BPF_OBJ_NAME_LEN
+        hash_t hash("SHA256");
+        auto sha256_hash = hash.hash_byte_ranges({{(uint8_t*)instructions, instruction_count * sizeof(ebpf_inst)}});
+
+        // Convert the hash to a string.
+        std::stringstream program_hash;
+        program_hash << std::hex << std::setfill('0');
+        for (auto byte : sha256_hash) {
+            program_hash << std::setw(2) << (int)byte;
+        }
+        program_hash_string = program_hash.str().substr(0, 63);
+        program_name = program_hash_string.c_str();
     }
 
     ebpf_handle_t program_handle;
@@ -3245,6 +3236,11 @@ ebpf_program_load_bytes(
 
     EBPF_RETURN_RESULT(result);
 }
+catch (const std::runtime_error& ex)
+{
+    EBPF_LOG_MESSAGE_STRING(EBPF_TRACELOG_LEVEL_ERROR, EBPF_TRACELOG_KEYWORD_ERROR, "*** ERROR *** ", ex.what());
+    EBPF_RETURN_RESULT(EBPF_INVALID_ARGUMENT);
+}
 CATCH_NO_MEMORY_EBPF_RESULT
 
 _Requires_lock_not_held_(_ebpf_state_mutex) static ebpf_result_t
@@ -3255,8 +3251,11 @@ _Requires_lock_not_held_(_ebpf_state_mutex) static ebpf_result_t
     ebpf_result_t result = EBPF_SUCCESS;
     std::vector<original_fd_handle_map_t> handle_map;
 
-    for (auto& program : object->programs) {
+    for (ebpf_program_t* program : object->programs) {
         if (!program->autoload) {
+            continue;
+        }
+        if (prog_is_subprog(object, program)) {
             continue;
         }
         result = _create_program(
@@ -3324,18 +3323,8 @@ ebpf_object_load(_Inout_ struct bpf_object* object) NO_EXCEPT_TRY
     }
 
     if (Platform::_is_native_program(object->file_name)) {
-        struct bpf_program* program = bpf_object__next_program(object, nullptr);
-        if (program == nullptr) {
-            EBPF_RETURN_RESULT(EBPF_INVALID_ARGUMENT);
-        }
-        fd_t program_fd;
-        return _ebpf_program_load_native(
-            object->file_name,
-            &program->program_type,
-            &program->attach_type,
-            object->execution_type,
-            object,
-            &program_fd);
+        result = _ebpf_program_load_native(object->file_name, object->execution_type, object);
+        EBPF_RETURN_RESULT(result);
     }
 
     try {
@@ -3485,9 +3474,6 @@ Done:
  * @brief Create maps and load programs from a loaded native module.
  *
  * @param[in] module_id Module ID corresponding to the native module.
- * @param[in] program_type Optionally, the program type to use when loading
- *  the eBPF program. If program type is not supplied, it is derived from
- *  the section prefix in the ELF file.
  * @param[in] count_of_maps Count of maps present in the native module.
  * @param[out] map_handles Array of size count_of_maps which contains the map handles.
  * @param[in] count_of_programs Count of programs present in the native module.
@@ -3504,7 +3490,6 @@ Done:
 static ebpf_result_t
 _load_native_programs(
     _In_ const GUID* module_id,
-    _In_opt_ const ebpf_program_type_t* program_type,
     size_t count_of_maps,
     _Out_writes_(count_of_maps) ebpf_handle_t* map_handles,
     size_t count_of_programs,
@@ -3516,9 +3501,8 @@ _load_native_programs(
     // Map count can be 0 (a program without any maps is a valid use case).
     ebpf_assert(count_of_maps == 0 || map_handles);
 
-    // Program count *must* be non-zero.
-    ebpf_assert(count_of_programs);
-    ebpf_assert(program_handles);
+    // Program count can be 0 (a map without any programs is a valid use case).
+    ebpf_assert(count_of_programs == 0 || program_handles);
 
     ebpf_result_t result = EBPF_SUCCESS;
     uint32_t error = ERROR_SUCCESS;
@@ -3532,7 +3516,9 @@ _load_native_programs(
     if (map_handles) {
         memset(map_handles, 0, map_handles_size);
     }
-    memset(program_handles, 0, program_handles_size);
+    if (program_handles) {
+        memset(program_handles, 0, program_handles_size);
+    }
 
     size_t buffer_size = offsetof(ebpf_operation_load_native_programs_reply_t, data) + handles_size;
     reply_buffer.resize(buffer_size);
@@ -3541,7 +3527,6 @@ _load_native_programs(
     request.header.id = ebpf_operation_id_t::EBPF_OPERATION_LOAD_NATIVE_PROGRAMS;
     request.header.length = sizeof(ebpf_operation_load_native_programs_request_t);
     request.module_id = *module_id;
-    request.program_type = program_type ? *program_type : GUID_NULL;
 
     error = invoke_ioctl(request, reply_buffer);
     if (error != ERROR_SUCCESS) {
@@ -3563,7 +3548,9 @@ _load_native_programs(
     if (count_of_maps) {
         memcpy(map_handles, reply->data, map_handles_size);
     }
-    memcpy(program_handles, reply->data + map_handles_size, program_handles_size);
+    if (count_of_programs) {
+        memcpy(program_handles, reply->data + map_handles_size, program_handles_size);
+    }
 
 Done:
     EBPF_RETURN_RESULT(result);
@@ -3571,20 +3558,13 @@ Done:
 
 static ebpf_result_t
 _ebpf_program_load_native(
-    _In_z_ const char* file_name,
-    _In_opt_ const ebpf_program_type_t* program_type,
-    _In_opt_ const ebpf_attach_type_t* attach_type,
-    ebpf_execution_type_t execution_type,
-    _Inout_ struct bpf_object* object,
-    _Out_ fd_t* program_fd) NO_EXCEPT_TRY
+    _In_z_ const char* file_name, ebpf_execution_type_t execution_type, _Inout_ struct bpf_object* object) NO_EXCEPT_TRY
 {
     EBPF_LOG_ENTRY();
-    UNREFERENCED_PARAMETER(attach_type);
     UNREFERENCED_PARAMETER(execution_type);
 
     ebpf_assert(file_name);
     ebpf_assert(object);
-    ebpf_assert(program_fd);
 
     ebpf_result_t result = EBPF_SUCCESS;
     uint32_t error;
@@ -3679,26 +3659,18 @@ _ebpf_program_load_native(
 
         native_module_handle = ebpf_handle_invalid;
 
-        if (count_of_programs == 0) {
-            result = EBPF_INVALID_OBJECT;
-            EBPF_LOG_MESSAGE_STRING(
-                EBPF_TRACELOG_LEVEL_ERROR,
-                EBPF_TRACELOG_KEYWORD_API,
-                "_ebpf_program_load_native: O programs found",
-                file_name);
-            goto Done;
-        }
-
-        // Allocate buffer for program and map handles.
-        program_handles = (ebpf_handle_t*)ebpf_allocate(count_of_programs * sizeof(ebpf_handle_t));
-        if (program_handles == nullptr) {
-            result = EBPF_NO_MEMORY;
-            EBPF_LOG_MESSAGE_STRING(
-                EBPF_TRACELOG_LEVEL_ERROR,
-                EBPF_TRACELOG_KEYWORD_API,
-                "_ebpf_program_load_native: program handle buffer allocation failed.",
-                file_name);
-            goto Done;
+        // Allocate buffers for program and map handles.
+        if (count_of_programs > 0) {
+            program_handles = (ebpf_handle_t*)ebpf_allocate(count_of_programs * sizeof(ebpf_handle_t));
+            if (program_handles == nullptr) {
+                result = EBPF_NO_MEMORY;
+                EBPF_LOG_MESSAGE_STRING(
+                    EBPF_TRACELOG_LEVEL_ERROR,
+                    EBPF_TRACELOG_KEYWORD_API,
+                    "_ebpf_program_load_native: program handle buffer allocation failed.",
+                    file_name);
+                goto Done;
+            }
         }
 
         if (count_of_maps > 0) {
@@ -3714,8 +3686,8 @@ _ebpf_program_load_native(
             }
         }
 
-        result = _load_native_programs(
-            &provider_module_id, program_type, count_of_maps, map_handles, count_of_programs, program_handles);
+        result =
+            _load_native_programs(&provider_module_id, count_of_maps, map_handles, count_of_programs, program_handles);
         if (result != EBPF_SUCCESS) {
             EBPF_LOG_MESSAGE_STRING(
                 EBPF_TRACELOG_LEVEL_ERROR,
@@ -3736,8 +3708,6 @@ _ebpf_program_load_native(
             goto Done;
         }
         native_module_fd = ebpf_fd_invalid;
-
-        *program_fd = object->programs[0]->fd;
     } catch (const std::bad_alloc&) {
         result = EBPF_NO_MEMORY;
         goto Done;
@@ -3816,28 +3786,42 @@ _Requires_lock_not_held_(_ebpf_state_mutex) _Ret_maybenull_
 }
 CATCH_NO_MEMORY_PTR(struct bpf_object*)
 
+// This function is derived from libbpf's function of the same name.
+static _Ret_maybenull_ struct bpf_program*
+__bpf_program__iter(_In_opt_ const struct bpf_program* program, _In_ const struct bpf_object* object, bool forward)
+{
+    ebpf_assert(object);
+    size_t nr_programs = object->programs.size();
+
+    if (nr_programs == 0) {
+        return nullptr;
+    }
+    if (program == nullptr) {
+        // Iterate from the beginning.
+        return forward ? object->programs[0] : object->programs[nr_programs - 1];
+    }
+    if (program->object != object) {
+        errno = EINVAL;
+        return nullptr;
+    }
+    auto iterator = std::find(object->programs.begin(), object->programs.end(), program);
+    ptrdiff_t idx = std::distance(object->programs.begin(), iterator) + (forward ? 1 : -1);
+    if ((size_t)idx >= nr_programs || idx < 0) {
+        return nullptr;
+    }
+    return object->programs[idx];
+}
+
 _Ret_maybenull_ struct bpf_program*
 ebpf_program_next(_In_opt_ const struct bpf_program* previous, _In_ const struct bpf_object* object) NO_EXCEPT_TRY
 {
     EBPF_LOG_ENTRY();
-    ebpf_program_t* program = nullptr;
-    ebpf_assert(object);
-    if (previous != nullptr && previous->object != object) {
-        goto Exit;
-    }
-    if (previous == nullptr) {
-        program = (object->programs.size() > 0) ? object->programs[0] : nullptr;
-    } else {
-        size_t programs_count = object->programs.size();
-        for (size_t i = 0; i < programs_count; i++) {
-            if (object->programs[i] == previous && i < programs_count - 1) {
-                program = object->programs[i + 1];
-                break;
-            }
-        }
-    }
+    const ebpf_program_t* program = previous;
 
-Exit:
+    do {
+        program = __bpf_program__iter(program, object, true);
+    } while (program && prog_is_subprog(object, program));
+
     EBPF_RETURN_POINTER(bpf_program*, program);
 }
 CATCH_NO_MEMORY_PTR(bpf_program*)
@@ -3846,24 +3830,12 @@ _Ret_maybenull_ struct bpf_program*
 ebpf_program_previous(_In_opt_ const struct bpf_program* next, _In_ const struct bpf_object* object) NO_EXCEPT_TRY
 {
     EBPF_LOG_ENTRY();
-    ebpf_program_t* program = nullptr;
-    ebpf_assert(object);
-    if (next != nullptr && next->object != object) {
-        goto Exit;
-    }
-    if (next == nullptr) {
-        program = object->programs[object->programs.size() - 1];
-    } else {
-        size_t programs_count = object->programs.size();
-        for (auto i = programs_count - 1; i > 0; i--) {
-            if (object->programs[i] == next) {
-                program = object->programs[i - 1];
-                break;
-            }
-        }
-    }
+    const ebpf_program_t* program = next;
 
-Exit:
+    do {
+        program = __bpf_program__iter(program, object, false);
+    } while (program && prog_is_subprog(object, program));
+
     EBPF_RETURN_POINTER(bpf_program*, program);
 }
 CATCH_NO_MEMORY_PTR(struct bpf_program*)
@@ -4337,7 +4309,7 @@ CATCH_NO_MEMORY_EBPF_RESULT
 
 _Must_inspect_result_ ebpf_result_t
 ebpf_ring_buffer_map_subscribe(
-    fd_t ring_buffer_map_fd,
+    fd_t map_fd,
     _Inout_opt_ void* sample_callback_context,
     ring_buffer_sample_fn sample_callback,
     _Outptr_ ring_buffer_subscription_t** subscription) NO_EXCEPT_TRY
@@ -4351,22 +4323,41 @@ ebpf_ring_buffer_map_subscribe(
 
         ebpf_result_t result = EBPF_SUCCESS;
 
+        uint32_t key_size = 0;
+        uint32_t value_size = 0;
+        uint32_t max_entries = 0;
+        uint32_t type;
+
+        ebpf_handle_t map_handle = _get_handle_from_file_descriptor(map_fd);
+        if (map_handle == ebpf_handle_invalid) {
+            result = EBPF_INVALID_FD;
+            EBPF_RETURN_RESULT(result);
+        }
+
+        result = _get_map_descriptor_properties(map_handle, &type, &key_size, &value_size, &max_entries);
+        if (result != EBPF_SUCCESS) {
+            EBPF_RETURN_RESULT(result);
+        }
+
+        if (type != BPF_MAP_TYPE_RINGBUF) {
+            result = EBPF_INVALID_ARGUMENT;
+            EBPF_LOG_MESSAGE_ERROR(
+                EBPF_TRACELOG_LEVEL_ERROR,
+                EBPF_TRACELOG_KEYWORD_API,
+                "ring_buffer__new API is called on a map that is not of the ring buffer type.",
+                result);
+            EBPF_RETURN_RESULT(result);
+        }
+
         *subscription = nullptr;
 
         ebpf_ring_buffer_subscription_ptr local_subscription = std::make_unique<ebpf_ring_buffer_subscription_t>();
 
         local_subscription->ring_buffer_map_handle = ebpf_handle_invalid;
 
-        // Get the handle to ring buffer map.
-        ebpf_handle_t ring_buffer_map_handle = _get_handle_from_file_descriptor(ring_buffer_map_fd);
-        if (ring_buffer_map_handle == ebpf_handle_invalid) {
-            result = EBPF_INVALID_FD;
-            EBPF_RETURN_RESULT(result);
-        }
-
         if (!Platform::DuplicateHandle(
                 reinterpret_cast<ebpf_handle_t>(GetCurrentProcess()),
-                ring_buffer_map_handle,
+                map_handle,
                 reinterpret_cast<ebpf_handle_t>(GetCurrentProcess()),
                 &local_subscription->ring_buffer_map_handle,
                 0,
@@ -4431,6 +4422,62 @@ ebpf_ring_buffer_map_subscribe(
     } catch (const std::bad_alloc&) {
         return EBPF_NO_MEMORY;
     }
+}
+CATCH_NO_MEMORY_EBPF_RESULT
+
+_Must_inspect_result_ ebpf_result_t
+ebpf_ring_buffer_map_write(fd_t map_fd, _In_reads_bytes_(data_length) const void* data, size_t data_length)
+    NO_EXCEPT_TRY
+{
+    EBPF_LOG_ENTRY();
+    ebpf_result_t result = EBPF_SUCCESS;
+    ebpf_handle_t map_handle = ebpf_handle_invalid;
+    ebpf_protocol_buffer_t request_buffer;
+    ebpf_operation_ring_buffer_map_write_data_request_t* request;
+
+    if (!data || !data_length) {
+        return EBPF_INVALID_ARGUMENT;
+    }
+
+    try {
+        uint32_t key_size = 0;
+        uint32_t value_size = 0;
+        uint32_t max_entries = 0;
+        uint32_t type;
+
+        map_handle = _get_handle_from_file_descriptor(map_fd);
+        if (map_handle == ebpf_handle_invalid) {
+            result = EBPF_INVALID_FD;
+            EBPF_RETURN_RESULT(result);
+        }
+
+        result = _get_map_descriptor_properties(map_handle, &type, &key_size, &value_size, &max_entries);
+        if (result != EBPF_SUCCESS) {
+            EBPF_RETURN_RESULT(result);
+        }
+
+        if (type != BPF_MAP_TYPE_RINGBUF) {
+            result = EBPF_INVALID_ARGUMENT;
+            EBPF_LOG_MESSAGE_ERROR(
+                EBPF_TRACELOG_LEVEL_ERROR,
+                EBPF_TRACELOG_KEYWORD_API,
+                "ebpf_ring_buffer_map_write API is called on a map that is not of the ring buffer type.",
+                result);
+            EBPF_RETURN_RESULT(result);
+        }
+
+        request_buffer.resize(EBPF_OFFSET_OF(ebpf_operation_ring_buffer_map_write_data_request_t, data) + data_length);
+        request = reinterpret_cast<_ebpf_operation_ring_buffer_map_write_data_request*>(request_buffer.data());
+        request->header.length = static_cast<uint16_t>(request_buffer.size());
+        request->header.id = ebpf_operation_id_t::EBPF_OPERATION_RING_BUFFER_MAP_WRITE_DATA;
+        request->map_handle = (uint64_t)map_handle;
+        std::copy((uint8_t*)data, (uint8_t*)data + data_length, request->data);
+
+        result = win32_error_code_to_ebpf_result(invoke_ioctl(request_buffer));
+    } catch (const std::bad_alloc&) {
+        EBPF_RETURN_RESULT(EBPF_NO_MEMORY);
+    }
+    EBPF_RETURN_RESULT(result);
 }
 CATCH_NO_MEMORY_EBPF_RESULT
 

@@ -16,7 +16,7 @@ static const uint32_t _ebpf_object_marker = 'eobj';
 static ebpf_lock_t _ebpf_object_tracking_list_lock = {0};
 
 /**
- * @brief Objects are allocated an entry in the the ID
+ * @brief Objects are allocated an entry in the ID
  * table when they are initialized.  Along with a pointer to the
  * object, each id table entry maintains its own ref-count that
  * starts off at 1 when it is assigned to a new object. The
@@ -195,6 +195,7 @@ ebpf_object_initialize(
     _In_ ebpf_free_object_t free_function,
     _In_opt_ ebpf_zero_ref_count_t zero_ref_count_function,
     ebpf_object_get_program_type_t get_program_type_function,
+    ebpf_object_get_context_header_support_t get_context_header_support_function,
     ebpf_file_id_t file_id,
     uint32_t line)
 {
@@ -210,6 +211,7 @@ ebpf_object_initialize(
     object->free_function = free_function;
     object->zero_ref_count = zero_ref_count_function;
     object->get_program_type = get_program_type_function;
+    object->get_context_header_support = get_context_header_support_function;
     object->id = ebpf_interlocked_increment_int32((volatile int32_t*)&_ebpf_next_id);
     // Skip invalid IDs.
     while (object->id == 0 || object->id == EBPF_ID_NONE) {

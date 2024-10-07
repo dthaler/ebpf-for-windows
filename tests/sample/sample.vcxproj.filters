@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--
   Copyright (c) eBPF for Windows contributors
   SPDX-License-Identifier: MIT
@@ -25,6 +25,9 @@
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="bindmonitor.c">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="bindmonitor_bpf2bpf.c">
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="bindmonitor_ringbuf.c">
@@ -64,6 +67,9 @@
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="test_sample_ebpf.c">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="test_sample_implicit_helpers.c">
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="reflect_packet.c">
@@ -118,6 +124,9 @@
       <Filter>Source Files</Filter>
     </CustomBuild>
     <CustomBuild Include="cgroup_sendto_count3.c">
+      <Filter>Source Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="multiple_programs.c">
       <Filter>Source Files</Filter>
     </CustomBuild>
   </ItemGroup>

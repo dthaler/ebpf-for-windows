@@ -173,6 +173,7 @@ _get_hash(_Outptr_result_buffer_maybenull_(*size) const uint8_t** hash, _Out_ si
     *hash = NULL;
     *size = 0;
 }
+
 #pragma data_seg(push, "maps")
 static map_entry_t _maps[] = {
     {NULL,
@@ -225,7 +226,7 @@ callee(void* context)
 #line 33 "sample/undocked/tail_call_same_section.c"
 {
 #line 33 "sample/undocked/tail_call_same_section.c"
-    // Prologue
+    // Prologue.
 #line 33 "sample/undocked/tail_call_same_section.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 33 "sample/undocked/tail_call_same_section.c"
@@ -265,7 +266,7 @@ callee(void* context)
     r1 = POINTER(_maps[1].address);
     // EBPF_OP_CALL pc=6 dst=r0 src=r0 offset=0 imm=1
 #line 38 "sample/undocked/tail_call_same_section.c"
-    r0 = callee_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = callee_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 38 "sample/undocked/tail_call_same_section.c"
     if ((callee_helpers[0].tail_call) && (r0 == 0)) {
 #line 38 "sample/undocked/tail_call_same_section.c"
@@ -292,7 +293,7 @@ label_1:
     // EBPF_OP_EXIT pc=11 dst=r0 src=r0 offset=0 imm=0
 #line 42 "sample/undocked/tail_call_same_section.c"
     return r0;
-#line 42 "sample/undocked/tail_call_same_section.c"
+#line 33 "sample/undocked/tail_call_same_section.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -315,7 +316,7 @@ caller(void* context)
 #line 33 "sample/undocked/tail_call_same_section.c"
 {
 #line 33 "sample/undocked/tail_call_same_section.c"
-    // Prologue
+    // Prologue.
 #line 33 "sample/undocked/tail_call_same_section.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 33 "sample/undocked/tail_call_same_section.c"
@@ -352,7 +353,7 @@ caller(void* context)
     r3 = IMMEDIATE(9);
     // EBPF_OP_CALL pc=5 dst=r0 src=r0 offset=0 imm=5
 #line 38 "sample/undocked/tail_call_same_section.c"
-    r0 = caller_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = caller_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 38 "sample/undocked/tail_call_same_section.c"
     if ((caller_helpers[0].tail_call) && (r0 == 0)) {
 #line 38 "sample/undocked/tail_call_same_section.c"
@@ -370,7 +371,7 @@ caller(void* context)
     r1 = POINTER(_maps[1].address);
     // EBPF_OP_CALL pc=10 dst=r0 src=r0 offset=0 imm=1
 #line 41 "sample/undocked/tail_call_same_section.c"
-    r0 = caller_helpers[1].address(r1, r2, r3, r4, r5);
+    r0 = caller_helpers[1].address(r1, r2, r3, r4, r5, context);
 #line 41 "sample/undocked/tail_call_same_section.c"
     if ((caller_helpers[1].tail_call) && (r0 == 0)) {
 #line 41 "sample/undocked/tail_call_same_section.c"
@@ -397,7 +398,7 @@ label_1:
     // EBPF_OP_EXIT pc=15 dst=r0 src=r0 offset=0 imm=0
 #line 46 "sample/undocked/tail_call_same_section.c"
     return r0;
-#line 46 "sample/undocked/tail_call_same_section.c"
+#line 33 "sample/undocked/tail_call_same_section.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -446,7 +447,7 @@ static void
 _get_version(_Out_ bpf2c_version_t* version)
 {
     version->major = 0;
-    version->minor = 17;
+    version->minor = 20;
     version->revision = 0;
 }
 

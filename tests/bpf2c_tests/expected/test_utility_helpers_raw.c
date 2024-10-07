@@ -12,6 +12,7 @@ _get_hash(_Outptr_result_buffer_maybenull_(*size) const uint8_t** hash, _Out_ si
     *hash = NULL;
     *size = 0;
 }
+
 #pragma data_seg(push, "maps")
 static map_entry_t _maps[] = {
     {NULL,
@@ -59,7 +60,7 @@ test_utility_helpers(void* context)
 #line 33 "sample/undocked/test_utility_helpers.c"
 {
 #line 33 "sample/undocked/test_utility_helpers.c"
-    // Prologue
+    // Prologue.
 #line 33 "sample/undocked/test_utility_helpers.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 33 "sample/undocked/test_utility_helpers.c"
@@ -107,7 +108,7 @@ test_utility_helpers(void* context)
     *(uint64_t*)(uintptr_t)(r10 + OFFSET(-48)) = (uint64_t)r1;
     // EBPF_OP_CALL pc=8 dst=r0 src=r0 offset=0 imm=6
 #line 16 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 16 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[0].tail_call) && (r0 == 0)) {
 #line 16 "sample/./sample_common_routines.h"
@@ -119,7 +120,7 @@ test_utility_helpers(void* context)
     *(uint32_t*)(uintptr_t)(r10 + OFFSET(-48)) = (uint32_t)r0;
     // EBPF_OP_CALL pc=10 dst=r0 src=r0 offset=0 imm=7
 #line 24 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[1].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[1].address(r1, r2, r3, r4, r5, context);
 #line 24 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[1].tail_call) && (r0 == 0)) {
 #line 24 "sample/./sample_common_routines.h"
@@ -131,7 +132,7 @@ test_utility_helpers(void* context)
     *(uint64_t*)(uintptr_t)(r10 + OFFSET(-32)) = (uint64_t)r0;
     // EBPF_OP_CALL pc=12 dst=r0 src=r0 offset=0 imm=9
 #line 27 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[2].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[2].address(r1, r2, r3, r4, r5, context);
 #line 27 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[2].tail_call) && (r0 == 0)) {
 #line 27 "sample/./sample_common_routines.h"
@@ -143,7 +144,7 @@ test_utility_helpers(void* context)
     *(uint64_t*)(uintptr_t)(r10 + OFFSET(-40)) = (uint64_t)r0;
     // EBPF_OP_CALL pc=14 dst=r0 src=r0 offset=0 imm=8
 #line 30 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[3].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[3].address(r1, r2, r3, r4, r5, context);
 #line 30 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[3].tail_call) && (r0 == 0)) {
 #line 30 "sample/./sample_common_routines.h"
@@ -155,7 +156,7 @@ test_utility_helpers(void* context)
     *(uint32_t*)(uintptr_t)(r10 + OFFSET(-24)) = (uint32_t)r0;
     // EBPF_OP_CALL pc=16 dst=r0 src=r0 offset=0 imm=19
 #line 33 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[4].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[4].address(r1, r2, r3, r4, r5, context);
 #line 33 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[4].tail_call) && (r0 == 0)) {
 #line 33 "sample/./sample_common_routines.h"
@@ -188,7 +189,7 @@ test_utility_helpers(void* context)
     r4 = IMMEDIATE(0);
     // EBPF_OP_CALL pc=26 dst=r0 src=r0 offset=0 imm=2
 #line 36 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[5].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[5].address(r1, r2, r3, r4, r5, context);
 #line 36 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[5].tail_call) && (r0 == 0)) {
 #line 36 "sample/./sample_common_routines.h"
@@ -197,7 +198,7 @@ test_utility_helpers(void* context)
     }
     // EBPF_OP_CALL pc=27 dst=r0 src=r0 offset=0 imm=6
 #line 39 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 39 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[0].tail_call) && (r0 == 0)) {
 #line 39 "sample/./sample_common_routines.h"
@@ -209,7 +210,7 @@ test_utility_helpers(void* context)
     *(uint32_t*)(uintptr_t)(r10 + OFFSET(-48)) = (uint32_t)r0;
     // EBPF_OP_CALL pc=29 dst=r0 src=r0 offset=0 imm=9
 #line 42 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[2].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[2].address(r1, r2, r3, r4, r5, context);
 #line 42 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[2].tail_call) && (r0 == 0)) {
 #line 42 "sample/./sample_common_routines.h"
@@ -221,7 +222,7 @@ test_utility_helpers(void* context)
     *(uint64_t*)(uintptr_t)(r10 + OFFSET(-40)) = (uint64_t)r0;
     // EBPF_OP_CALL pc=31 dst=r0 src=r0 offset=0 imm=7
 #line 45 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[1].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[1].address(r1, r2, r3, r4, r5, context);
 #line 45 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[1].tail_call) && (r0 == 0)) {
 #line 45 "sample/./sample_common_routines.h"
@@ -233,7 +234,7 @@ test_utility_helpers(void* context)
     *(uint64_t*)(uintptr_t)(r10 + OFFSET(-32)) = (uint64_t)r0;
     // EBPF_OP_CALL pc=33 dst=r0 src=r0 offset=0 imm=19
 #line 48 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[4].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[4].address(r1, r2, r3, r4, r5, context);
 #line 48 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[4].tail_call) && (r0 == 0)) {
 #line 48 "sample/./sample_common_routines.h"
@@ -260,7 +261,7 @@ test_utility_helpers(void* context)
     r4 = IMMEDIATE(0);
     // EBPF_OP_CALL pc=41 dst=r0 src=r0 offset=0 imm=2
 #line 51 "sample/./sample_common_routines.h"
-    r0 = test_utility_helpers_helpers[5].address(r1, r2, r3, r4, r5);
+    r0 = test_utility_helpers_helpers[5].address(r1, r2, r3, r4, r5, context);
 #line 51 "sample/./sample_common_routines.h"
     if ((test_utility_helpers_helpers[5].tail_call) && (r0 == 0)) {
 #line 51 "sample/./sample_common_routines.h"
@@ -273,7 +274,7 @@ test_utility_helpers(void* context)
     // EBPF_OP_EXIT pc=43 dst=r0 src=r0 offset=0 imm=0
 #line 35 "sample/undocked/test_utility_helpers.c"
     return r0;
-#line 35 "sample/undocked/test_utility_helpers.c"
+#line 33 "sample/undocked/test_utility_helpers.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -308,7 +309,7 @@ static void
 _get_version(_Out_ bpf2c_version_t* version)
 {
     version->major = 0;
-    version->minor = 17;
+    version->minor = 20;
     version->revision = 0;
 }
 

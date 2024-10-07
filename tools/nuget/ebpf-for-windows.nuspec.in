@@ -5,21 +5,21 @@
 <package>
 	<metadata>
 		<title>eBPF for Windows SDK</title>
-		<id>eBPF-for-Windows</id>
+		<id>eBPF-for-Windows.{architecture}</id>
 		<version>{version}</version>
 		<authors>eBPF for Windows Contributors</authors>
 		<owners>eBPF for Windows Contributors</owners>
 		<requireLicenseAcceptance>false</requireLicenseAcceptance>
 		<license type="expression">MIT</license>
 		<projectUrl>https://github.com/Microsoft/ebpf-for-windows</projectUrl>
-		<repository type="git" url="https://github.com/microsoft/ebpf-for-windows.git"/>
+		<repository type="git" url="https://github.com/microsoft/ebpf-for-windows.git" commit="{git_commit_id}"/>
 		<tags>native ebpf</tags>
 		<description>eBPF for Windows SDK</description>
 		<readme>README.md</readme>
 	</metadata>
 	<files>
 		<file src="..\..\tools\nuget\README.md" target="."/>
-		<file src="..\..\tools\nuget\ebpf-for-windows.props" target="build\native"/>
+		<file src="ebpf-for-windows.{architecture}.props" target="build\native"/>
 		<file src="Convert-BpfToNative.ps1" target="build\native\bin"/>
 		<file src="bpf2c.exe" target="build\native\bin"/>
 		<file src="bpf2c.pdb" target="build\native\bin"/>

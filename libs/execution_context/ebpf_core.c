@@ -16,9 +16,11 @@
 #include "ebpf_random.h"
 #include "ebpf_serialize.h"
 #include "ebpf_state.h"
+#include "ebpf_strings.h"
 #include "ebpf_tracelog.h"
 
 #include <errno.h>
+#include <stdlib.h>
 
 const NPI_MODULEID ebpf_general_helper_function_module_id = {
     sizeof(ebpf_general_helper_function_module_id),
@@ -139,12 +141,15 @@ static const void* _ebpf_general_helpers[] = {
     (void*)&_ebpf_core_memmove,
     // No default implementation of bpf_get_socket_cookie
     (void*)NULL, // bpf_get_socket_cookie
+    (void*)&_ebpf_core_strncpy_s,
+    (void*)&_ebpf_core_strncat_s,
+    (void*)&_ebpf_core_strlen_s,
 };
 
 static const ebpf_helper_function_addresses_t _ebpf_global_helper_function_dispatch_table = {
     EBPF_HELPER_FUNCTION_ADDRESSES_HEADER, EBPF_COUNT_OF(_ebpf_general_helpers), (uint64_t*)_ebpf_general_helpers};
 static const ebpf_program_data_t _ebpf_global_helper_function_program_data = {
-    EBPF_PROGRAM_DATA_HEADER, &_ebpf_global_helper_program_info, &_ebpf_global_helper_function_dispatch_table};
+    EBPF_PROGRAM_DATA_HEADER, &_ebpf_global_helper_program_info, NULL, &_ebpf_global_helper_function_dispatch_table};
 
 static NPI_PROVIDER_ATTACH_CLIENT_FN _ebpf_general_helper_function_provider_attach_client;
 static NPI_PROVIDER_DETACH_CLIENT_FN _ebpf_general_helper_function_provider_detach_client;
@@ -256,8 +261,8 @@ ebpf_core_initiate()
         goto Done;
     }
 
-    _ebpf_global_helper_program_info.count_of_program_type_specific_helpers = ebpf_core_helper_functions_count;
-    _ebpf_global_helper_program_info.program_type_specific_helper_prototype = ebpf_core_helper_function_prototype;
+    _ebpf_global_helper_program_info.count_of_global_helpers = ebpf_core_helper_functions_count;
+    _ebpf_global_helper_program_info.global_helper_prototype = ebpf_core_helper_function_prototype;
 
     status = NmrRegisterProvider(
         &_ebpf_global_helper_function_provider_characteristics, NULL, &_ebpf_global_helper_function_nmr_binding_handle);
@@ -394,7 +399,7 @@ ebpf_core_resolve_helper(
     ebpf_handle_t program_handle,
     const size_t count_of_helpers,
     _In_reads_(count_of_helpers) const uint32_t* helper_function_ids,
-    _Out_writes_(count_of_helpers) uint64_t* helper_function_addresses)
+    _Out_writes_(count_of_helpers) helper_function_address_t* helper_function_addresses)
 {
     EBPF_LOG_ENTRY();
     ebpf_program_t* program = NULL;
@@ -715,11 +720,6 @@ _ebpf_core_protocol_load_native_programs(
         goto Done;
     }
 
-    if (count_of_program_handles == 0) {
-        result = EBPF_INVALID_ARGUMENT;
-        goto Done;
-    }
-
     result = ebpf_safe_size_t_multiply(count_of_map_handles, sizeof(ebpf_handle_t), &map_handles_size);
     if (result != EBPF_SUCCESS) {
         goto Done;
@@ -754,10 +754,12 @@ _ebpf_core_protocol_load_native_programs(
         }
     }
 
-    program_handles = ebpf_allocate_with_tag(sizeof(ebpf_handle_t) * count_of_program_handles, EBPF_POOL_TAG_CORE);
-    if (program_handles == NULL) {
-        result = EBPF_NO_MEMORY;
-        goto Done;
+    if (count_of_program_handles) {
+        program_handles = ebpf_allocate_with_tag(sizeof(ebpf_handle_t) * count_of_program_handles, EBPF_POOL_TAG_CORE);
+        if (program_handles == NULL) {
+            result = EBPF_NO_MEMORY;
+            goto Done;
+        }
     }
 
     result = ebpf_native_load_programs(
@@ -772,7 +774,9 @@ _ebpf_core_protocol_load_native_programs(
     if (map_handles) {
         memcpy(reply->data, map_handles, map_handles_size);
     }
-    memcpy(reply->data + map_handles_size, program_handles, program_handles_size);
+    if (program_handles) {
+        memcpy(reply->data + map_handles_size, program_handles, program_handles_size);
+    }
 
 Done:
     ebpf_free(map_handles);
@@ -816,7 +820,7 @@ _ebpf_core_protocol_map_find_element(
         request->key,
         value_length,
         reply->value,
-        request->find_and_delete ? EPBF_MAP_FIND_FLAG_DELETE : 0);
+        request->find_and_delete ? EBPF_MAP_FIND_FLAG_DELETE : 0);
     if (retval != EBPF_SUCCESS) {
         goto Done;
     }
@@ -1132,7 +1136,7 @@ _ebpf_core_protocol_map_get_next_key_value_batch(
         previous_key_length == 0 ? NULL : request->previous_key,
         &reply_data_length,
         reply->data,
-        request->find_and_delete ? EPBF_MAP_FIND_FLAG_DELETE : 0);
+        request->find_and_delete ? EBPF_MAP_FIND_FLAG_DELETE : 0);
 
     if (retval != EBPF_SUCCESS) {
         goto Done;
@@ -1167,9 +1171,8 @@ _ebpf_core_protocol_program_test_run_complete(
 {
     ebpf_operation_program_test_run_reply_t* reply = (ebpf_operation_program_test_run_reply_t*)completion_context;
     if (result == EBPF_SUCCESS) {
-        reply->header.length = (uint16_t)(
-            EBPF_OFFSET_OF(ebpf_operation_program_test_run_reply_t, data) + options->data_size_out +
-            options->context_size_out);
+        reply->header.length = (uint16_t)(EBPF_OFFSET_OF(ebpf_operation_program_test_run_reply_t, data) +
+                                          options->data_size_out + options->context_size_out);
         reply->return_value = options->return_value;
         reply->context_offset = (uint16_t)options->data_size_out;
         reply->duration = options->duration;
@@ -1763,8 +1766,8 @@ _ebpf_core_protocol_serialize_map_info_reply(
         &required_serialization_length);
 
     if (result != EBPF_SUCCESS) {
-        map_info_reply->header.length = (uint16_t)(
-            required_serialization_length + EBPF_OFFSET_OF(ebpf_operation_get_pinned_map_info_reply_t, data));
+        map_info_reply->header.length = (uint16_t)(required_serialization_length +
+                                                   EBPF_OFFSET_OF(ebpf_operation_get_pinned_map_info_reply_t, data));
     } else {
         map_info_reply->map_count = map_count;
     }
@@ -2022,6 +2025,11 @@ _ebpf_core_protocol_ring_buffer_map_query_buffer(
 
     if (ebpf_map_get_definition(map)->type != BPF_MAP_TYPE_RINGBUF) {
         result = EBPF_INVALID_ARGUMENT;
+        EBPF_LOG_MESSAGE_ERROR(
+            EBPF_TRACELOG_LEVEL_ERROR,
+            EBPF_TRACELOG_KEYWORD_CORE,
+            "query buffer operation called on a map that is not of the ring buffer type.",
+            result);
         goto Exit;
     }
 
@@ -2054,6 +2062,11 @@ _ebpf_core_protocol_ring_buffer_map_async_query(
 
     if (ebpf_map_get_definition(map)->type != BPF_MAP_TYPE_RINGBUF) {
         result = EBPF_INVALID_ARGUMENT;
+        EBPF_LOG_MESSAGE_ERROR(
+            EBPF_TRACELOG_LEVEL_ERROR,
+            EBPF_TRACELOG_KEYWORD_CORE,
+            "async query operation called on a map that is not of the ring buffer type.",
+            result);
         goto Exit;
     }
 
@@ -2072,6 +2085,38 @@ Exit:
         EBPF_OBJECT_RELEASE_REFERENCE((ebpf_core_object_t*)map);
     }
     return result;
+}
+
+static ebpf_result_t
+_ebpf_core_protocol_ring_buffer_map_write_data(_In_ const ebpf_operation_ring_buffer_map_write_data_request_t* request)
+{
+    ebpf_map_t* map = NULL;
+    size_t data_length = 0;
+    ebpf_result_t result =
+        EBPF_OBJECT_REFERENCE_BY_HANDLE(request->map_handle, EBPF_OBJECT_MAP, (ebpf_core_object_t**)&map);
+    if (result != EBPF_SUCCESS) {
+        goto Exit;
+    }
+    if (ebpf_map_get_definition(map)->type != BPF_MAP_TYPE_RINGBUF) {
+        result = EBPF_INVALID_ARGUMENT;
+        EBPF_LOG_MESSAGE_ERROR(
+            EBPF_TRACELOG_LEVEL_ERROR,
+            EBPF_TRACELOG_KEYWORD_CORE,
+            "write data operation called on a map that is not of the ring buffer type.",
+            result);
+        goto Exit;
+    }
+    result = ebpf_safe_size_t_subtract(
+        request->header.length,
+        EBPF_OFFSET_OF(ebpf_operation_ring_buffer_map_write_data_request_t, data),
+        &data_length);
+    if (result != EBPF_SUCCESS) {
+        goto Exit;
+    }
+    result = ebpf_ring_buffer_map_output(map, (uint8_t*)request->data, data_length);
+Exit:
+    EBPF_OBJECT_RELEASE_REFERENCE((ebpf_core_object_t*)map);
+    EBPF_RETURN_RESULT(result);
 }
 
 static void*
@@ -2105,7 +2150,7 @@ _ebpf_core_map_find_and_delete_element(_Inout_ ebpf_map_t* map, _In_ const uint8
     ebpf_result_t retval;
     uint8_t* value;
     retval = ebpf_map_find_entry(
-        map, 0, key, sizeof(&value), (uint8_t*)&value, EBPF_MAP_FLAG_HELPER | EPBF_MAP_FIND_FLAG_DELETE);
+        map, 0, key, sizeof(&value), (uint8_t*)&value, EBPF_MAP_FLAG_HELPER | EBPF_MAP_FIND_FLAG_DELETE);
     if (retval != EBPF_SUCCESS) {
         return NULL;
     } else {
@@ -2116,14 +2161,12 @@ _ebpf_core_map_find_and_delete_element(_Inout_ ebpf_map_t* map, _In_ const uint8
 static int64_t
 _ebpf_core_tail_call(void* context, ebpf_map_t* map, uint32_t index)
 {
-    UNREFERENCED_PARAMETER(context);
-
     // Get program from map[index].
     ebpf_program_t* callee = ebpf_map_get_program_from_entry(map, sizeof(index), (uint8_t*)&index);
     if (callee == NULL) {
         return -EBPF_INVALID_ARGUMENT;
     }
-    return -ebpf_program_set_tail_call(callee);
+    return -ebpf_program_set_tail_call(context, callee);
 }
 
 static uint32_t
@@ -2269,9 +2312,9 @@ _ebpf_core_trace_printk(_In_reads_(fmt_size) const char* fmt, size_t fmt_size, i
 
     if ((*p == 0) && (arg_count == specifier_count)) {
         va_list arg_list;
-        __va_start(&arg_list, arg_count);
+        va_start(arg_list, arg_count);
         bytes_written = ebpf_platform_printk(output, arg_list);
-        __va_end(&arg_list);
+        va_end(arg_list);
     }
 
     ebpf_free(output);
@@ -2609,6 +2652,7 @@ static ebpf_protocol_handler_t _ebpf_protocol_handlers[] = {
     DECLARE_PROTOCOL_HANDLER_FIXED_REQUEST_NO_REPLY(bind_map, PROTOCOL_ALL_MODES),
     DECLARE_PROTOCOL_HANDLER_FIXED_REQUEST_FIXED_REPLY(ring_buffer_map_query_buffer, PROTOCOL_ALL_MODES),
     DECLARE_PROTOCOL_HANDLER_FIXED_REQUEST_FIXED_REPLY_ASYNC(ring_buffer_map_async_query, PROTOCOL_ALL_MODES),
+    DECLARE_PROTOCOL_HANDLER_VARIABLE_REQUEST_NO_REPLY(ring_buffer_map_write_data, data, PROTOCOL_ALL_MODES),
     DECLARE_PROTOCOL_HANDLER_VARIABLE_REQUEST_FIXED_REPLY(load_native_module, data, PROTOCOL_NATIVE_MODE),
     DECLARE_PROTOCOL_HANDLER_FIXED_REQUEST_VARIABLE_REPLY(load_native_programs, data, PROTOCOL_NATIVE_MODE),
     DECLARE_PROTOCOL_HANDLER_VARIABLE_REQUEST_VARIABLE_REPLY_ASYNC(program_test_run, data, data, PROTOCOL_ALL_MODES),

@@ -5,6 +5,8 @@
 #include "ebpf_hash_table.h"
 #include "ebpf_random.h"
 
+#include <intrin.h>
+
 // Buckets contain an array of pointers to value and keys.
 // Buckets are immutable once inserted in to the hash-table and replaced when
 // modified.
@@ -51,9 +53,10 @@ typedef struct _ebpf_hash_bucket_header_and_lock
  */
 struct _ebpf_hash_table
 {
-    size_t bucket_count;            // Count of buckets.
-    size_t bucket_count_mask;       // Mask to use to get bucket index from hash.
-    volatile size_t entry_count;    // Count of entries in the hash table.
+    size_t bucket_count;      // Count of buckets.
+    size_t bucket_count_mask; // Mask to use to get bucket index from hash.
+    volatile size_t
+        entry_count; // Count of entries in the hash table. Only valid if max_entry_count != EBPF_HASH_TABLE_NO_LIMIT.
     size_t max_entry_count;         // Maximum number of entries allowed or EBPF_HASH_TABLE_NO_LIMIT if no maximum.
     uint32_t seed;                  // Seed used for hashing.
     size_t key_size;                // Size of key.
@@ -153,20 +156,86 @@ _ebpf_murmur3_32(_In_reads_((length_in_bits + 7) / 8) const uint8_t* key, size_t
     hash ^= (hash >> 16);
     return hash;
 }
+#if defined(_M_X64)
+static unsigned long
+_ebpf_compute_crc32(_In_reads_(length_in_bytes) const uint8_t* key, size_t length_in_bytes, uint32_t seed)
+{
+    // First process 8 bytes at a time.
+    uint32_t crc = seed;
+    uint8_t* start = (uint8_t*)key;
+    uint8_t* end = start + length_in_bytes;
+
+    while ((end - start) >= 8) {
+        crc = (uint32_t)_mm_crc32_u64(crc, *(uint64_t*)start);
+        start += 8;
+    }
+
+    // Process 4 bytes at a time.
+    while ((end - start) >= 4) {
+        crc = _mm_crc32_u32(crc, *(uint32_t*)start);
+        start += 4;
+    }
+
+    // Process remaining bytes.
+    while ((end - start) > 0) {
+        crc = _mm_crc32_u8(crc, *start);
+        start++;
+    }
+    return crc;
+}
+#endif
 
 /**
- * @brief Given two potentially non-comparable key values, extract the key and
- * compare them.
+ * @brief Compare keys assuming they are integers.
  *
  * @param[in] hash_table Hash table the keys belong to.
  * @param[in] key_a First key.
  * @param[in] key_b Second key.
- * @retval -1 if key_a < key_b
- * @retval 0 if key_a == key_b
- * @retval 1 if key_a > key_b
+ *
+ * @return -1 if key_a < key_b, 0 if key_a == key_b, 1 if key_a > key_b.
+ */
+static __forceinline int
+_ebpf_hash_table_compare_integer_keys(
+    _In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_t* key_a, _In_ const uint8_t* key_b)
+{
+    uint64_t lhs;
+    uint64_t rhs;
+    switch (hash_table->key_size) {
+    case 1:
+        lhs = *key_a;
+        rhs = *key_b;
+        break;
+    case 2:
+        lhs = *(uint16_t*)key_a;
+        rhs = *(uint16_t*)key_b;
+        break;
+    case 4:
+        lhs = *(uint32_t*)key_a;
+        rhs = *(uint32_t*)key_b;
+        break;
+    case 8:
+        lhs = *(uint64_t*)key_a;
+        rhs = *(uint64_t*)key_b;
+        break;
+    default:
+        ebpf_assert(false);
+        return 0;
+    }
+    return (lhs < rhs) ? -1 : (lhs > rhs) ? 1 : 0;
+}
+
+/**
+ * @brief Compare keys that require extraction and compare as byte arrays.
+ *
+ * @param[in] hash_table Hash table the keys belong to.
+ * @param[in] key_a First key.
+ * @param[in] key_b Second key.
+ *
+ * @return -1 if key_a < key_b, 0 if key_a == key_b, 1 if key_a > key_b.
  */
 static int
-_ebpf_hash_table_compare(_In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_t* key_a, _In_ const uint8_t* key_b)
+_ebpf_hash_table_compare_extracted_keys(
+    _In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_t* key_a, _In_ const uint8_t* key_b)
 {
     size_t length_a_in_bits;
     size_t length_b_in_bits;
@@ -174,22 +243,19 @@ _ebpf_hash_table_compare(_In_ const ebpf_hash_table_t* hash_table, _In_ const ui
     const uint8_t* data_b;
     uint8_t remainder_a;
     uint8_t remainder_b;
-    if (hash_table->extract) {
-        hash_table->extract(key_a, &data_a, &length_a_in_bits);
-        hash_table->extract(key_b, &data_b, &length_b_in_bits);
-    } else {
-        length_a_in_bits = hash_table->key_size * 8;
-        data_a = key_a;
-        length_b_in_bits = hash_table->key_size * 8;
-        data_b = key_b;
-    }
+
+    hash_table->extract(key_a, &data_a, &length_a_in_bits);
+    hash_table->extract(key_b, &data_b, &length_b_in_bits);
+
     if (length_a_in_bits < length_b_in_bits) {
         return -1;
     }
     if (length_a_in_bits > length_b_in_bits) {
         return 1;
     }
+
     int cmp_result = memcmp(data_a, data_b, length_a_in_bits / 8);
+
     // No match or length ends on a byte boundary.
     if (cmp_result != 0 || length_a_in_bits % 8 == 0) {
         return cmp_result;
@@ -209,6 +275,31 @@ _ebpf_hash_table_compare(_In_ const ebpf_hash_table_t* hash_table, _In_ const ui
 }
 
 /**
+ * @brief Wrapper to select the best comparison method for keys based on key size and extract function.
+ *
+ * @param[in] hash_table Hash table the keys belong to.
+ * @param[in] key_a First key.
+ * @param[in] key_b Second key.
+ * @retval -1 if key_a < key_b
+ * @retval 0 if key_a == key_b
+ * @retval 1 if key_a > key_b
+ */
+static __forceinline int
+_ebpf_hash_table_compare(_In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_t* key_a, _In_ const uint8_t* key_b)
+{
+    if (hash_table->extract) {
+        // If key is not integer and extract function is provided, use it to compare.
+        return _ebpf_hash_table_compare_extracted_keys(hash_table, key_a, key_b);
+    } else if ((hash_table->key_size & (hash_table->key_size - 1)) == 0 && hash_table->key_size <= 8) {
+        // If key size is a power of 2 and less than or equal to 64 bits, compare as integers.
+        return _ebpf_hash_table_compare_integer_keys(hash_table, key_a, key_b);
+    } else {
+        // Otherwise, compare as byte arrays.
+        return memcmp(key_a, key_b, hash_table->key_size);
+    }
+}
+
+/**
  * @brief Given a potentially non-comparable key value, extract the key and
  * compute the hash and convert it to a bucket index.
  *
@@ -219,16 +310,22 @@ _ebpf_hash_table_compare(_In_ const ebpf_hash_table_t* hash_table, _In_ const ui
 static uint32_t
 _ebpf_hash_table_compute_bucket_index(_In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_t* key)
 {
-    size_t length;
-    const uint8_t* data;
-    if (hash_table->extract) {
-        hash_table->extract(key, &data, &length);
+    if (!hash_table->extract) {
+#if defined(_M_X64)
+        if (ebpf_processor_supports_sse42) {
+            return _ebpf_compute_crc32(key, hash_table->key_size, hash_table->seed) & hash_table->bucket_count_mask;
+        } else {
+            return _ebpf_murmur3_32(key, hash_table->key_size * 8, hash_table->seed) & hash_table->bucket_count_mask;
+        }
+#else
+        return _ebpf_murmur3_32(key, hash_table->key_size * 8, hash_table->seed) & hash_table->bucket_count_mask;
+#endif
     } else {
-        length = hash_table->key_size * 8;
-        data = key;
+        uint8_t* data;
+        size_t length;
+        hash_table->extract(key, &data, &length);
+        return _ebpf_murmur3_32(data, length, hash_table->seed) & hash_table->bucket_count_mask;
     }
-    uint32_t hash_value = _ebpf_murmur3_32(data, length, hash_table->seed);
-    return hash_value & hash_table->bucket_count_mask;
 }
 
 /**
@@ -246,6 +343,33 @@ _ebpf_hash_table_bucket_entry(size_t key_size, _In_ const ebpf_hash_bucket_heade
     size_t entry_size = EBPF_OFFSET_OF(ebpf_hash_bucket_entry_t, key) + key_size;
 
     return (ebpf_hash_bucket_entry_t*)(offset + (size_t)index * entry_size);
+}
+
+/**
+ * @brief Helper function to ensure correct memory ordering when reading a bucket from the hash table.
+ *
+ * @param[in] hash_table Pointer to the hash table.
+ * @param[in] bucket_index Index of the bucket to read.
+ * @return Pointer to the bucket or NULL if the bucket is empty.
+ */
+static inline ebpf_hash_bucket_header_t*
+_ebpf_hash_table_get_bucket(_In_ const ebpf_hash_table_t* hash_table, size_t bucket_index)
+{
+    return (ebpf_hash_bucket_header_t*)ReadSizeTAcquire((ULONG_PTR*)&(hash_table->buckets[bucket_index].header));
+}
+
+/**
+ * @brief Helper function to ensure correct memory ordering when writing a bucket to the hash table.
+ *
+ * @param[in] hash_table Pointer to the hash table.
+ * @param[in] bucket_index Index of the bucket to write.
+ * @param[in] bucket Bucket pointer to write.
+ */
+static inline void
+_ebpf_hash_table_set_bucket(
+    _In_ ebpf_hash_table_t* hash_table, size_t bucket_index, _In_opt_ ebpf_hash_bucket_header_t* bucket)
+{
+    WriteSizeTRelease((ULONG_PTR*)&(hash_table->buckets[bucket_index].header), (ULONG_PTR)bucket);
 }
 
 /**
@@ -277,10 +401,12 @@ _ebpf_hash_table_bucket_insert(
     ebpf_hash_bucket_header_t* local_new_bucket = NULL;
     ebpf_hash_bucket_header_t* backup_bucket = NULL;
 
-    size_t new_entry_count = ebpf_interlocked_increment_int64((volatile int64_t*)&hash_table->entry_count);
-    if (new_entry_count > hash_table->max_entry_count && hash_table->max_entry_count != EBPF_HASH_TABLE_NO_LIMIT) {
-        result = EBPF_OUT_OF_SPACE;
-        goto Done;
+    if (hash_table->max_entry_count != EBPF_HASH_TABLE_NO_LIMIT) {
+        size_t new_entry_count = ebpf_interlocked_increment_int64_no_fence((volatile int64_t*)&hash_table->entry_count);
+        if (new_entry_count > hash_table->max_entry_count) {
+            result = EBPF_OUT_OF_SPACE;
+            goto Done;
+        }
     }
 
     // Allocate new bucket.
@@ -322,8 +448,10 @@ Done:
     hash_table->free(local_new_bucket);
     hash_table->free(backup_bucket);
 
-    if (result != EBPF_SUCCESS) {
-        ebpf_interlocked_decrement_int64((volatile int64_t*)&hash_table->entry_count);
+    if (hash_table->max_entry_count != EBPF_HASH_TABLE_NO_LIMIT) {
+        if (result != EBPF_SUCCESS) {
+            ebpf_interlocked_decrement_int64_no_fence((volatile int64_t*)&hash_table->entry_count);
+        }
     }
 
     return result;
@@ -391,7 +519,9 @@ _ebpf_hash_table_bucket_delete(
     *new_bucket = backup_bucket;
 
 Done:
-    ebpf_interlocked_decrement_int64((volatile int64_t*)&hash_table->entry_count);
+    if (hash_table->max_entry_count != EBPF_HASH_TABLE_NO_LIMIT) {
+        ebpf_interlocked_decrement_int64_no_fence((volatile int64_t*)&hash_table->entry_count);
+    }
 
     return;
 }
@@ -499,7 +629,7 @@ _ebpf_hash_table_replace_bucket(
     }
 
     // Find the old bucket.
-    old_bucket = hash_table->buckets[bucket_index].header;
+    old_bucket = _ebpf_hash_table_get_bucket(hash_table, bucket_index);
     size_t old_bucket_count = old_bucket ? old_bucket->count : 0;
 
     // Find the entry in the bucket, if any.
@@ -555,7 +685,7 @@ _ebpf_hash_table_replace_bucket(
 
     // Update the bucket in the hash table.
     // From this point on the new bucket is immutable.
-    hash_table->buckets[bucket_index].header = new_bucket;
+    _ebpf_hash_table_set_bucket(hash_table, bucket_index, new_bucket);
     new_data = NULL;
     new_bucket = NULL;
 
@@ -679,7 +809,7 @@ ebpf_hash_table_find(_In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_
     }
 
     bucket_index = _ebpf_hash_table_compute_bucket_index(hash_table, key);
-    bucket = hash_table->buckets[bucket_index].header;
+    bucket = _ebpf_hash_table_get_bucket(hash_table, bucket_index);
     if (!bucket) {
         retval = EBPF_KEY_NOT_FOUND;
         goto Done;
@@ -697,6 +827,11 @@ ebpf_hash_table_find(_In_ const ebpf_hash_table_t* hash_table, _In_ const uint8_
         retval = EBPF_KEY_NOT_FOUND;
         goto Done;
     }
+
+#if defined(_M_X64)
+    // Prefetch the data on the assumption that it will be used by the caller soon.
+    _mm_prefetch((const char*)data, _MM_HINT_T0);
+#endif
 
     *value = data;
     if (hash_table->notification_callback) {
@@ -782,7 +917,7 @@ ebpf_hash_table_next_key_pointer_and_value(
         (previous_key != NULL) ? _ebpf_hash_table_compute_bucket_index(hash_table, previous_key) : 0;
 
     for (bucket_index = starting_bucket_index; bucket_index < hash_table->bucket_count; bucket_index++) {
-        ebpf_hash_bucket_header_t* bucket = hash_table->buckets[bucket_index].header;
+        ebpf_hash_bucket_header_t* bucket = _ebpf_hash_table_get_bucket(hash_table, bucket_index);
         // Skip empty buckets.
         if (!bucket) {
             continue;
@@ -871,7 +1006,20 @@ ebpf_hash_table_next_key(
 size_t
 ebpf_hash_table_key_count(_In_ const ebpf_hash_table_t* hash_table)
 {
-    return hash_table->entry_count;
+    // If max_entry_count is being enforced, return the current count.
+    if (hash_table->max_entry_count != EBPF_HASH_TABLE_NO_LIMIT) {
+        return hash_table->entry_count;
+    } else {
+        // Otherwise, count the keys in the hash table.
+        size_t count = 0;
+        for (size_t i = 0; i < hash_table->bucket_count; i++) {
+            ebpf_hash_bucket_header_t* bucket = hash_table->buckets[i].header;
+            if (bucket) {
+                count += bucket->count;
+            }
+        }
+        return count;
+    }
 }
 
 _Must_inspect_result_ ebpf_result_t
@@ -894,7 +1042,7 @@ ebpf_hash_table_iterate(
         if (bucket_index >= hash_table->bucket_count) {
             break;
         }
-        ebpf_hash_bucket_header_t* bucket_header = hash_table->buckets[bucket_index].header;
+        ebpf_hash_bucket_header_t* bucket_header = _ebpf_hash_table_get_bucket(hash_table, bucket_index);
         // Check if the bucket is empty.
         if (!bucket_header) {
             bucket_index++;
@@ -943,7 +1091,7 @@ ebpf_hash_table_next_key_and_value_sorted(
     uint8_t* next_key_pointer = NULL;
     uint8_t* next_value_pointer = NULL;
     for (size_t bucket_index = 0; bucket_index < hash_table->bucket_count; bucket_index++) {
-        ebpf_hash_bucket_header_t* bucket_header = hash_table->buckets[bucket_index].header;
+        ebpf_hash_bucket_header_t* bucket_header = _ebpf_hash_table_get_bucket(hash_table, bucket_index);
         if (!bucket_header) {
             continue;
         }

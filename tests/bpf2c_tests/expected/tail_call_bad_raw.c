@@ -12,6 +12,7 @@ _get_hash(_Outptr_result_buffer_maybenull_(*size) const uint8_t** hash, _Out_ si
     *hash = NULL;
     *size = 0;
 }
+
 #pragma data_seg(push, "maps")
 static map_entry_t _maps[] = {
     {NULL,
@@ -56,7 +57,7 @@ callee(void* context)
 #line 49 "sample/undocked/tail_call_bad.c"
 {
 #line 49 "sample/undocked/tail_call_bad.c"
-    // Prologue
+    // Prologue.
 #line 49 "sample/undocked/tail_call_bad.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 49 "sample/undocked/tail_call_bad.c"
@@ -100,7 +101,7 @@ caller(void* context)
 #line 33 "sample/undocked/tail_call_bad.c"
 {
 #line 33 "sample/undocked/tail_call_bad.c"
-    // Prologue
+    // Prologue.
 #line 33 "sample/undocked/tail_call_bad.c"
     uint64_t stack[(UBPF_STACK_SIZE + 7) / 8];
 #line 33 "sample/undocked/tail_call_bad.c"
@@ -139,7 +140,7 @@ caller(void* context)
     r3 = IMMEDIATE(10);
     // EBPF_OP_CALL pc=5 dst=r0 src=r0 offset=0 imm=5
 #line 39 "sample/undocked/tail_call_bad.c"
-    r0 = caller_helpers[0].address(r1, r2, r3, r4, r5);
+    r0 = caller_helpers[0].address(r1, r2, r3, r4, r5, context);
 #line 39 "sample/undocked/tail_call_bad.c"
     if ((caller_helpers[0].tail_call) && (r0 == 0)) {
 #line 39 "sample/undocked/tail_call_bad.c"
@@ -160,7 +161,7 @@ caller(void* context)
     r1 = POINTER(_maps[1].address);
     // EBPF_OP_CALL pc=11 dst=r0 src=r0 offset=0 imm=1
 #line 41 "sample/undocked/tail_call_bad.c"
-    r0 = caller_helpers[1].address(r1, r2, r3, r4, r5);
+    r0 = caller_helpers[1].address(r1, r2, r3, r4, r5, context);
 #line 41 "sample/undocked/tail_call_bad.c"
     if ((caller_helpers[1].tail_call) && (r0 == 0)) {
 #line 41 "sample/undocked/tail_call_bad.c"
@@ -187,7 +188,7 @@ label_1:
     // EBPF_OP_EXIT pc=16 dst=r0 src=r0 offset=0 imm=0
 #line 46 "sample/undocked/tail_call_bad.c"
     return r0;
-#line 46 "sample/undocked/tail_call_bad.c"
+#line 33 "sample/undocked/tail_call_bad.c"
 }
 #pragma code_seg(pop)
 #line __LINE__ __FILE__
@@ -236,7 +237,7 @@ static void
 _get_version(_Out_ bpf2c_version_t* version)
 {
     version->major = 0;
-    version->minor = 17;
+    version->minor = 20;
     version->revision = 0;
 }
 

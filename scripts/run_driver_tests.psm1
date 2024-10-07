@@ -1,4 +1,4 @@
-# Copyright (c) eBPF for Windows contributors
+﻿# Copyright (c) eBPF for Windows contributors
 # SPDX-License-Identifier: MIT
 
 param ([Parameter(Mandatory=$True)] [string] $WorkingDirectory,
@@ -88,21 +88,34 @@ function Invoke-CICDTests
     param([parameter(Mandatory = $true)][bool] $VerboseLogs,
           [parameter(Mandatory = $false)][bool] $Coverage = $false,
           [parameter(Mandatory = $false)][int] $TestHangTimeout = 3600,
-          [parameter(Mandatory = $false)][string] $UserModeDumpFolder = "C:\Dumps"
+          [parameter(Mandatory = $false)][string] $UserModeDumpFolder = "C:\Dumps",
+          [parameter(Mandatory = $true)][bool] $ExecuteSystemTests
     )
 
 
     Push-Location $WorkingDirectory
     $env:EBPF_ENABLE_WER_REPORT = "yes"
 
+    # load_native_program_invalid4 has been deleted from the test list, but 0.17 tests still have this test.
+    # That causes the regression test to fail. So, we are skipping this test for now.
     $TestList = @(
-        "api_test.exe",
+        "api_test.exe ~`"load_native_program_invalid4`"",
         "bpftool_tests.exe",
         "sample_ext_app.exe",
         "socket_tests.exe")
 
+    $SystemTestList = @("api_test.exe")
+
     foreach ($Test in $TestList) {
         Invoke-Test -TestName $Test -VerboseLogs $VerboseLogs -Coverage $Coverage
+    }
+
+    # Now run the system tests. No coverage is needed for these tests.
+    if ($ExecuteSystemTests) {
+        foreach ($Test in $SystemTestList) {
+            $TestCommand = "PsExec64.exe -accepteula -nobanner -s -w `"$pwd`" `"$pwd\$Test`" `"-d yes`""
+            Invoke-Test -TestName $TestCommand -VerboseLogs $VerboseLogs -Coverage $false
+        }
     }
 
     if ($Coverage) {

@@ -49,6 +49,10 @@ on:
         required: false
         type: boolean
         default: true
+      solution_file:
+        required: false
+        type: string
+        default: 'ebpf-for-windows.sln'
     outputs:
       should_skip:
         description: 'Whether build was skipped due to duplicate action.'
@@ -75,7 +79,7 @@ jobs:
     runs-on: windows-2022
     env:
       # Path to the solution file relative to the root of the project.
-      SOLUTION_FILE_PATH: ebpf-for-windows.sln
+      SOLUTION_FILE_PATH: ${{inputs.solution_file}}
       BUILD_ARTIFACT_NAME: ${{inputs.build_artifact}}
       BUILD_CONFIGURATION: ${{matrix.configurations}}
       BUILD_PLATFORM: x64
@@ -85,7 +89,7 @@ jobs:
 
     steps:
     - name: Harden Runner
-      uses: step-security/harden-runner@f086349bfa2bd1361f7909c78558e816508cdc10 # v2.8.0
+      uses: step-security/harden-runner@91182cccc01eb5e619899d80e4e971d6181294a7 # v2.10.1
       with:
         egress-policy: audit
 
@@ -103,8 +107,9 @@ jobs:
         powershell.exe "echo 'msvc_tools_path=%VCToolsInstallDir%' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append"
         powershell.exe "echo 'msvc_tools_version=%VCToolsVersion%' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append"
         powershell.exe "echo 'ASAN_WIN_CONTINUE_ON_INTERCEPTION_FAILURE=true' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append"
+        powershell.exe "echo 'VCINSTALLDIR=%VCINSTALLDIR%' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append"
 
-    - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
+    - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       if: steps.skip_check.outputs.should_skip != 'true'
       with:
         repository: ${{inputs.repository}}
@@ -122,39 +127,22 @@ jobs:
 
     - name: Initialize CodeQL
       if: inputs.build_codeql == true && steps.skip_check.outputs.should_skip != 'true'
-      uses: github/codeql-action/init@9fdb3e49720b44c48891d036bb502feb25684276
+      uses: github/codeql-action/init@461ef6c76dfe95d5c364de2f431ddbd31a417628
       with:
         languages: 'cpp'
 
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce
 
-    - name: Setup choco cache folder
-      # Set the choco cache to a local folder so that it can be cached.
+    - name: Add Visual Studio LLVM to path
       if: steps.skip_check.outputs.should_skip != 'true'
-      id: choco-cache
       run: |
-        mkdir ${{github.workspace}}\choco_cache
-        choco config set --name cacheLocation --value ${{github.workspace}}\choco_cache
+        echo "$env:VCINSTALLDIR\tools\llvm\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    - name: Cache choco packages
-      # Add cache entry for any choco packages that are installed.
-      # The cache key is based on the hash of this file so if any choco packages are added or removed, the cache will be invalidated.
+    - name: Check for Clang version
       if: steps.skip_check.outputs.should_skip != 'true'
-      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
-      env:
-        cache-name: cache-choco-packages
-      with:
-        path: ${{github.workspace}}\choco_cache
-        key: ${{ hashFiles('.github/workflows/reusable-build.yml') }}
-
-    - name: Install tools
-      if: steps.skip_check.outputs.should_skip != 'true'
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: |
-        choco install -y llvm --version 11.0.1 --allow-downgrade
-        echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        where clang.exe
+      run:
+        clang.exe --version
 
     - name: Cache nuget packages
       if: steps.skip_check.outputs.should_skip != 'true'
@@ -241,15 +229,15 @@ jobs:
 
     - name: Upload Build Output
       if: always() && (steps.skip_check.outputs.should_skip != 'true') && (inputs.build_artifact != 'none')
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
       with:
         name: ${{inputs.build_artifact}}-${{matrix.configurations}}
         path: ${{github.workspace}}/build-${{ matrix.configurations }}.zip
-        retention-days: 5
+        retention-days: 10
 
     - name: Upload the MSI package
       if: inputs.build_msi == true
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
       with:
         name: ebpf-for-windows - MSI installer (${{inputs.build_artifact}}_${{env.BUILD_CONFIGURATION}})
         path: ${{github.workspace}}/${{env.BUILD_PLATFORM}}/${{env.BUILD_CONFIGURATION}}/ebpf-for-windows.msi
@@ -261,7 +249,7 @@ jobs:
 
     - name: Upload the NuGet package
       if: inputs.build_nuget == true && matrix.configurations == 'Release' && steps.skip_check.outputs.should_skip != 'true'
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
       with:
         name: ebpf-for-windows - NuGet package (${{inputs.build_artifact}}_${{env.BUILD_CONFIGURATION}})
         path: ${{github.workspace}}/${{env.BUILD_PLATFORM}}/${{env.BUILD_CONFIGURATION}}/eBPF-for-Windows.*.nupkg
@@ -273,7 +261,7 @@ jobs:
 
     - name: Upload the NuGet Redist package
       if: inputs.build_nuget == true && (matrix.configurations == 'Release' || matrix.configurations == 'NativeOnlyRelease') && steps.skip_check.outputs.should_skip != 'true'
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
       with:
         name: ebpf-for-windows - NuGet Redist package (${{inputs.build_artifact}}_${{env.BUILD_CONFIGURATION}})
         path: ${{github.workspace}}/${{env.BUILD_PLATFORM}}/${{env.BUILD_CONFIGURATION}}/eBPF-for-Windows-Redist.*.nupkg
@@ -289,13 +277,13 @@ jobs:
     - name: Upload any crash dumps
       # Upload crash dumps even if the workflow failed.
       if: (success() || failure()) && (steps.skip_check.outputs.should_skip != 'true') && (steps.check_dumps.outputs.files_exists == 'true')
-      uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+      uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
       id: upload_crash_dumps
       with:
         name: Crash-Dumps-${{env.NAME}}-${{env.BUILD_PLATFORM}}-${{env.BUILD_CONFIGURATION}}
         path: c:/dumps/${{env.BUILD_PLATFORM}}/${{env.BUILD_CONFIGURATION}}
-        retention-days: 5
+        retention-days: 10
 
     - name: Perform CodeQL Analysis
       if: inputs.build_codeql == true && steps.skip_check.outputs.should_skip != 'true'
-      uses: github/codeql-action/analyze@9fdb3e49720b44c48891d036bb502feb25684276
+      uses: github/codeql-action/analyze@461ef6c76dfe95d5c364de2f431ddbd31a417628

@@ -29,6 +29,7 @@
 #include <complex>
 #include <condition_variable>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <numeric>
 #include <sddl.h>
@@ -460,6 +461,7 @@ TEST_CASE("pinning_test", "[platform]")
                     some_object->signal.signal();
                 },
                 NULL,
+                NULL,
                 NULL);
             if (return_value == EBPF_SUCCESS) {
                 finalized = false;
@@ -609,6 +611,7 @@ TEST_CASE("epoch_test_stale_items", "[platform]")
 
 static auto provider_function = []() { return EBPF_SUCCESS; };
 
+#if !defined(CONFIG_BPF_JIT_DISABLED)
 TEST_CASE("trampoline_test", "[platform]")
 {
     _test_helper test_helper;
@@ -658,6 +661,7 @@ TEST_CASE("trampoline_test", "[platform]")
     REQUIRE(test_function() == EBPF_OBJECT_ALREADY_EXISTS);
     ebpf_free_trampoline_table(table.release());
 }
+#endif
 
 struct ebpf_security_descriptor_t_free
 {
